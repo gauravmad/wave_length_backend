@@ -1,7 +1,10 @@
 from flask import Flask, send_from_directory
+from flask_socketio import SocketIO
 from app.config import Config
 from app.routes.user_routes import user_bp
-import os
+from app.socket.chat_socket import register_chat_events
+
+socketio = SocketIO(cors_allowed_origins="*")  # create globally
 
 def create_app():
     app = Flask(
@@ -13,6 +16,12 @@ def create_app():
 
     # Register Blueprints
     app.register_blueprint(user_bp, url_prefix="/api/user")
+
+    # Init socketio with app ✅
+    socketio.init_app(app, cors_allowed_origins="*")
+
+    # Register chat events ✅
+    register_chat_events(socketio)
 
     # Serve index.html on /
     @app.route("/")
