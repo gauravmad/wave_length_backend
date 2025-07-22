@@ -6,3 +6,5 @@ Flask-PyMongo
 dnspython
 python-dotenv
 google-generativeai
+PyJWT
+itsdangerous
