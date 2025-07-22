@@ -10,3 +10,4 @@ class Config:
     NOVU_API_KEY= os.getenv("NOVU_API_KEY")
     NOVU_TRIGGER_URL=os.getenv("NOVU_TRIGGER_URL")
     SUBSCRIBER_ID=os.getenv("SUBSCRIBER_ID")
+    SECRET_KEY=os.getenv("SECRET_KEY")
