@@ -18,6 +18,7 @@ def send_otp():
         return jsonify({"error":"Mobile Number is Required"}), 400
 
     otp = generate_otp()
+    print("OTP Trigger", otp)
 
     # Create token with OTP
     encrypted_otp_token = serializer.dumps(otp, salt="otp-verification")
@@ -29,7 +30,7 @@ def send_otp():
             "phone": f"+91{mobile_number}"
         },
         "payload": {
-            "otp": otp
+            "otp": int(otp)
         }
     }
 
@@ -40,7 +41,6 @@ def send_otp():
 
     try:
         response = requests.post(Config.NOVU_TRIGGER_URL, json=payload, headers=headers)
-        print(f"Send OTP Response {response}")
         if response.status_code == 201:
             return jsonify({
                 "success": True,
