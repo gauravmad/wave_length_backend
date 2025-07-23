@@ -2,50 +2,33 @@ from flask import Blueprint, request, jsonify
 import jwt
 import datetime
 from app.config import Config
-from ..models.users import create_user, get_all_users, get_user_by_mobile
+from ..models.users import create_user, get_user_by_mobile, get_all_users
 
 user_bp = Blueprint("user_bp", __name__)
 
 def generate_token(user_id):
     payload = {
-        "user_id":str(user_id),
-        "exp":datetime.datetime.utcnow() + datetime.timedelta(days=1)
+        "user_id": str(user_id),
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(days=1)
     }
-    token = jwt.encode(payload,Config.SECRET_KEY, algorithm="HS256")
-    return token
+    return jwt.encode(payload, Config.SECRET_KEY, algorithm="HS256")
 
-@user_bp.route("/", methods=["POST"])
-def create():
+# 🚀 Register Route
+@user_bp.route("/register", methods=["POST"])
+def register():
     data = request.get_json()
-
     required_fields = ["userName", "mobileNumber", "mobileNumberVerified", "age", "gender"]
+    
     if not all(field in data for field in required_fields):
         return jsonify({"error": "Missing required fields"}), 400
 
-    user = get_user_by_mobile(data["mobileNumber"])
+    if get_user_by_mobile(data["mobileNumber"]):
+        return jsonify({"success": False, "message": "User already exists"}), 409
 
-    # User already exists — treat as login
-    if user:
-        token = generate_token(user["_id"])
-        return jsonify({
-            "success": True,
-            "message": "Login successful",
-            "token": token,
-            "data": {
-                "userId": str(user["_id"]),
-                "userName": user["userName"],
-                "mobileNumber": user["mobileNumber"],
-                "mobileNumberVerified": user.get("mobileNumberVerified", False),
-                "age": user["age"],
-                "gender": user["gender"]
-            }
-        }), 200
-
-    # New user — register
     user_data = {
         "userName": data["userName"],
         "mobileNumber": data["mobileNumber"],
-        "mobileNumberVerified": data.get("mobileNumberVerified", False),
+        "mobileNumberVerified": data["mobileNumberVerified"],
         "age": data["age"],
         "gender": data["gender"]
     }
@@ -67,7 +50,37 @@ def create():
         }
     }), 201
 
+# ✅ Login Route
+@user_bp.route("/login", methods=["POST"])
+def login():
+    data = request.get_json()
+    mobile_number = data.get("mobileNumber")
 
+    if not mobile_number:
+        return jsonify({"error": "Mobile number is required"}), 400
+
+    user = get_user_by_mobile(mobile_number)
+
+    if not user:
+        return jsonify({"success": False, "message": "User not found Please Register"}), 404
+
+    token = generate_token(user["_id"])
+
+    return jsonify({
+        "success": True,
+        "message": "Login successful",
+        "token": token,
+        "data": {
+            "userId": str(user["_id"]),
+            "userName": user["userName"],
+            "mobileNumber": user["mobileNumber"],
+            "mobileNumberVerified": user.get("mobileNumberVerified", False),
+            "age": user["age"],
+            "gender": user["gender"]
+        }
+    }), 200
+
+# 📄 Optional: Get all users
 @user_bp.route("/", methods=["GET"])
 def get_users():
     users = get_all_users()
