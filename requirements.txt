@@ -8,4 +8,6 @@ python-dotenv
 google-generativeai
 PyJWT
 itsdangerous
+anthropic
 flask-cors
+eventlet
