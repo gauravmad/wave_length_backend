@@ -27,7 +27,7 @@ def send_otp():
         "name": "wave-otp-verification",
         "to": {
             "subscriberId": Config.SUBSCRIBER_ID,
-            "phone": f"+91{mobile_number}"
+            "phone": mobile_number
         },
         "payload": {
             "otp": int(otp)

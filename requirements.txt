@@ -10,4 +10,11 @@ PyJWT
 itsdangerous
 anthropic
 flask-cors
-eventlet
+langchain
+openai
+langchain-community
+langchain-openai
+chromadb
+sentence-transformers
+tiktoken
+openrouter

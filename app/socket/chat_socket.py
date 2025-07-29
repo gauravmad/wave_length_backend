@@ -2,7 +2,6 @@ from flask_socketio import SocketIO
 from flask import request
 from app.services.db import db
 from app.services.claude import get_claude_reply
-from datetime import datetime
 
 def register_chat_events(socketio: SocketIO):
     print("SocketIO initialized:", socketio)
@@ -33,10 +32,10 @@ def register_chat_events(socketio: SocketIO):
             return
 
         try:
-            # Fetch messages sorted by timestamp
+            # Use string format for consistency
             messages = chats.find({
-                "userId": user_id,
-                "characterId": character_id
+                "userId": str(user_id),
+                "characterId": str(character_id)
             }).sort("timestamp", 1)  # 1 for ascending order
 
             # Convert MongoDB cursor to list
@@ -48,83 +47,79 @@ def register_chat_events(socketio: SocketIO):
                 "timestamp": message["timestamp"]
             } for message in messages]
 
-            # Emit chat history back to the client
             socketio.emit("receive_chat_history", {
                 "messages": messages_list
             }, to=request.sid)
-            print(f"Sent {len(messages_list)} messages to client {request.sid}")
+            print(f"📤 Sent {len(messages_list)} messages to client {request.sid}")
+
         except Exception as e:
-            print(f"Error fetching chat history: {e}")
+            print(f"❌ Error fetching chat history: {e}")
             socketio.emit("chat_history_error", {
                 "error": "Failed to fetch chat history"
             }, to=request.sid)
 
     @socketio.on("send_message")
     def handle_send_message(data):
+        print(f"📨 Received message data: {data}")
+        
         user_id = data.get("userId")
         character_id = data.get("characterId")
         character_name = data.get("characterName")
         message = data.get("message")
 
-        if not all([user_id, character_id, message]):
-            print("Missing required data:", {
-                "user_id": user_id,
-                "character_id": character_id,
+        # Validate required fields
+        if not all([user_id, character_id, character_name, message]):
+            print("❌ Missing required data:", {
+                "user_id": bool(user_id),
+                "character_id": bool(character_id),
+                "character_name": bool(character_name),
                 "message": bool(message)
             })
+            socketio.emit("message_error", {
+                "error": "Missing required fields"
+            }, to=request.sid)
             return
 
-        # Store user message
-        chat_doc = {
-            "userId": user_id,
-            "characterId": character_id,
-            "sender": "user",
-            "message": message,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        chats.insert_one(chat_doc)
-
         try:
-            ai_reply = get_claude_reply(message, user_id, character_name, character_id)
+            print(f"🚀 Calling get_claude_reply for user {user_id}")
             
-            # Store AI response
-            ai_doc = {
-                "userId": user_id,
-                "characterId": character_id,
-                "sender": "ai",
-                "message": ai_reply,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-            chats.insert_one(ai_doc)
+            # Call Claude function which now handles ALL saving logic
+            result = get_claude_reply(
+                prompt=message,
+                user_id=str(user_id),  # Ensure string format
+                character_name=character_name,
+                character_id=str(character_id)  # Ensure string format
+            )
 
-            # Emit the response back to the client
-            socketio.emit("receive_message", {
-                "userId": user_id,
-                "characterId": character_id,
-                "sender": "ai",
-                "message": ai_reply,
-                "timestamp": datetime.utcnow().isoformat()
-            }, to=request.sid)
-            
+            print(f"✅ Claude function completed. Success: {result.get('success')}")
+
+            if result.get("success"):
+                # Emit successful AI response
+                socketio.emit("receive_message", {
+                    "userId": result["userId"],
+                    "characterId": result["characterId"],
+                    "sender": "ai",
+                    "message": result["message"],
+                    "timestamp": result["timestamp"]
+                }, to=request.sid)
+                print(f"📤 AI response sent to client {request.sid}")
+            else:
+                # Emit error response
+                socketio.emit("receive_message", {
+                    "userId": result["userId"],
+                    "characterId": result["characterId"],
+                    "sender": "ai",
+                    "message": result["message"],
+                    "timestamp": result["timestamp"]
+                }, to=request.sid)
+                print(f"📤 Error response sent to client {request.sid}")
+
         except Exception as e:
-            print(f"Error getting Claude reply: {e}")
-            error_message = "⚠️ Sorry, I'm having trouble responding right now."
+            print(f"❌ Socket handler error: {e}")
+            import traceback
+            traceback.print_exc()
             
-            # Store error message
-            error_doc = {
-                "userId": user_id,
-                "characterId": character_id,
-                "sender": "ai",
-                "message": error_message,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-            chats.insert_one(error_doc)
-            
-            # Emit error response
-            socketio.emit("receive_message", {
-                "userId": user_id,
-                "characterId": character_id,
-                "sender": "ai",
-                "message": error_message,
-                "timestamp": datetime.utcnow().isoformat()
+            # Send generic error to client
+            socketio.emit("message_error", {
+                "error": "Internal server error"
             }, to=request.sid)
