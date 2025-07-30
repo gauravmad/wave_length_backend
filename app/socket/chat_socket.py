@@ -17,7 +17,7 @@ def register_chat_events(socketio: SocketIO):
 
     @socketio.on("fetch_chat_history")
     def handle_fetch_chat_history(data):
-        print("Fetching chat history for:", data)
+        # print("Fetching chat history for:", data)
         user_id = data.get("userId")
         character_id = data.get("characterId")
 
@@ -60,7 +60,7 @@ def register_chat_events(socketio: SocketIO):
 
     @socketio.on("send_message")
     def handle_send_message(data):
-        print(f"📨 Received message data: {data}")
+        # print(f"📨 Received message data: {data}")
         
         user_id = data.get("userId")
         character_id = data.get("characterId")

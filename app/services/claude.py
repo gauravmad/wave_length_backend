@@ -8,42 +8,36 @@ from app.services.db import db
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
+# 🧠 Estimate tokens (approx: 1 token ≈ 4 characters)
+def estimate_tokens(text: str) -> int:
+    return max(1, len(text) // 4)
+
 def get_claude_reply(prompt: str, user_id: str, character_name: str, character_id: str) -> dict:
     try:
-        print(f"🔍 Starting get_claude_reply:")
+        print(f"\n🔍 Starting get_claude_reply:")
         print(f"   - user_id: {user_id}")
         print(f"   - character_id: {character_id}")
         print(f"   - character_name: {character_name}")
-        print(f"   - prompt: {prompt[:50]}...")
+        print(f"   - prompt length: {len(prompt)} chars")
 
-        # ✅ 1. Save user message to database FIRST
+        # ✅ 1. Save user message
         user_timestamp = datetime.utcnow().isoformat()
-        user_chat_doc = {
+        db.chats.insert_one({
             "userId": str(user_id),
             "characterId": str(character_id),
             "sender": "user",
             "message": prompt,
             "timestamp": user_timestamp
-        }
-        
-        print(f"💾 Saving user message to DB...")
-        user_result = db.chats.insert_one(user_chat_doc)
-        print(f"✅ User message saved with ID: {user_result.inserted_id}")
+        })
 
-        # ✅ 2. Fetch user details for personalization
+        # ✅ 2. Fetch user
         try:
             user_object_id = ObjectId(user_id)
             user = db.users.find_one({"_id": user_object_id})
         except:
-            # Fallback to string ID if ObjectId conversion fails
             user = db.users.find_one({"_id": user_id})
-        
-        if user:
-            print(f"👤 User found: {user.get('userName', 'Unknown')}")
-        else:
-            print(f"⚠️ No user found for user_id: {user_id}")
 
-        # ✅ 3. Load system prompt file
+        # ✅ 3. Load system prompt
         prompt_path = os.path.join("app", "system_prompt", f"{character_name.lower()}.txt")
         if not os.path.isfile(prompt_path):
             raise FileNotFoundError(f"Prompt file '{prompt_path}' not found.")
@@ -51,7 +45,7 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
         with open(prompt_path, "r", encoding="utf-8") as f:
             system_prompt = f.read().strip()
 
-        # ✅ 4. Replace placeholders with user details
+        # ✅ 4. Replace placeholders
         if user:
             system_prompt = system_prompt.replace("{{userName}}", user.get("userName", "bestie"))
             system_prompt = system_prompt.replace("{{gender}}", user.get("gender", ""))
@@ -61,96 +55,111 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
             system_prompt = system_prompt.replace("{{gender}}", "")
             system_prompt = system_prompt.replace("{{mobileNumber}}", "")
 
-        # Limit prompt size
-        system_prompt = system_prompt[:4000]
+        # ✅ 5. Estimate and limit context
+        max_context_tokens = 200000  # Claude 3.5 max context
+        system_tokens = estimate_tokens(system_prompt)
+        prompt_tokens = estimate_tokens(prompt)
+        reserved_output_tokens = 4096  # leave space for response
 
-        # ✅ 5. Fetch chat history (including the message we just saved)
+        remaining_tokens = max_context_tokens - (system_tokens + prompt_tokens + reserved_output_tokens)
+
+        print(f"🧠 Estimated Tokens:")
+        print(f"   - System Prompt: {system_tokens}")
+        print(f"   - User Prompt: {prompt_tokens}")
+        print(f"   - Reserved for Output: {reserved_output_tokens}")
+        print(f"   - Available for History: {remaining_tokens}")
+
+        # ✅ 6. Fetch and trim chat history
         chat_history = list(db.chats.find({
             "userId": str(user_id),
             "characterId": str(character_id)
-        }).sort("timestamp", -1).limit(50))
-        
-        print(f"💬 Found {len(chat_history)} total messages in history")
-        
-        # Reverse to get chronological order
-        chat_history.reverse()
+        }).sort("timestamp", -1)).limit(50)
 
-        # ✅ 6. Build messages for Claude
         messages = [SystemMessage(content=system_prompt)]
-        
-        for chat in chat_history:
-            sender = chat.get("sender", "").strip().lower()
-            message_text = chat.get("message", "")
-            if not message_text:
-                continue
-            
+        total_history_tokens = 0
+        added_messages = 0
+
+        # Reverse for chronological order
+        for chat in reversed(chat_history):
+            sender = chat.get("sender", "").lower()
+            text = chat.get("message", "")
+            token_count = estimate_tokens(text)
+
+            if total_history_tokens + token_count > remaining_tokens:
+                break
+
             if sender == "user":
-                messages.append(HumanMessage(content=message_text))
+                messages.append(HumanMessage(content=text))
             elif sender == "ai":
-                messages.append(AIMessage(content=message_text))
+                messages.append(AIMessage(content=text))
 
-        print(f"📝 Built {len(messages)} messages for Claude (1 system + {len(messages)-1} history)")
+            total_history_tokens += token_count
+            added_messages += 1
 
-        # ✅ 7. Get Claude response
+        # Add current user message last
+        messages.append(HumanMessage(content=prompt))
+
+        print(f"📚 Added {added_messages} chat messages to context ({total_history_tokens} tokens)")
+        print(f"📤 Sending total: {system_tokens + prompt_tokens + total_history_tokens} tokens")
+
+        # ✅ 7. Send to Claude
         chat = ChatOpenAI(
             model="anthropic/claude-3.5-sonnet",
             temperature=0.7,
-            max_tokens=1024,
+            max_tokens=4096,  # large enough for full response
             openai_api_base="https://openrouter.ai/api/v1",
             openai_api_key=Config.ANTHROPIC_API_KEY,
         )
 
-        print("🤖 Sending request to Claude...")
+        print("🤖 Calling Claude...")
         response = chat.invoke(messages)
         ai_reply = response.content.strip()
-        print(f"✅ Claude responded with {len(ai_reply)} characters")
+        ai_tokens = estimate_tokens(ai_reply)
 
-        # ✅ 8. Save AI response to database
+        print(f"✅ Claude responded with {len(ai_reply)} chars (~{ai_tokens} tokens)")
+
+        # ✅ 8. Save AI response
         ai_timestamp = datetime.utcnow().isoformat()
-        ai_chat_doc = {
+        db.chats.insert_one({
             "userId": str(user_id),
             "characterId": str(character_id),
             "sender": "ai",
             "message": ai_reply,
             "timestamp": ai_timestamp
-        }
-        
-        print(f"💾 Saving AI response to DB...")
-        ai_result = db.chats.insert_one(ai_chat_doc)
-        print(f"✅ AI response saved with ID: {ai_result.inserted_id}")
+        })
 
-        # ✅ 9. Return structured response for socket
+        # ✅ 9. Return response
         return {
             "success": True,
             "message": ai_reply,
             "timestamp": ai_timestamp,
+            "tokens": {
+                "system_prompt": system_tokens,
+                "user_prompt": prompt_tokens,
+                "chat_history": total_history_tokens,
+                "output": ai_tokens,
+                "total_used": system_tokens + prompt_tokens + total_history_tokens + ai_tokens
+            },
             "userId": str(user_id),
-            "characterId": str(character_id),
-            "user_message_saved": True,
-            "ai_message_saved": True
+            "characterId": str(character_id)
         }
 
     except Exception as e:
-        print(f"❌ Error in get_claude_reply: {str(e)}")
         import traceback
         traceback.print_exc()
-        
-        # ✅ Save error message to database
         error_message = "⚠️ Sorry, I'm having trouble responding right now."
         error_timestamp = datetime.utcnow().isoformat()
-        
+
         try:
-            error_chat_doc = {
+            db.chats.insert_one({
                 "userId": str(user_id),
                 "characterId": str(character_id),
                 "sender": "ai",
                 "message": error_message,
                 "timestamp": error_timestamp
-            }
-            db.chats.insert_one(error_chat_doc)
-            print("💾 Error message saved to DB")
-        except Exception as save_error:
-            print(f"❌ Failed to save error message: {save_error}")
+            })
+        except:
+            pass
 
         return {
             "success": False,
