@@ -1,28 +1,47 @@
 import os
 from datetime import datetime
 from bson import ObjectId
+import tiktoken
 
 from app.config import Config
 from app.services.db import db
-
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-def estimate_tokens(text: str) -> int:
-    return max(1, len(text) // 4)
 
+# ------------------------- Token Counter ------------------------- #
+def claude_token_count(text: str) -> int:
+    enc = tiktoken.get_encoding("cl100k_base")
+    return len(enc.encode(text))
+
+
+# ------------------------- Summary Fetcher ------------------------- #
+def fetch_all_summaries(user_id: str, character_id: str) -> list[str]:
+    doc = db.summaries.find_one({
+        "userId": user_id,
+        "characterId": character_id
+    })
+
+    if not doc or not doc.get("summaries"):
+        return []
+
+    # sort by createdAt ascending (oldest to newest)
+    return [s["summary"] for s in sorted(doc["summaries"], key=lambda x: x["createdAt"])]
+
+
+# ------------------------- Claude Invocation ------------------------- #
 def get_claude_reply(prompt: str, user_id: str, character_name: str, character_id: str) -> dict:
     try:
         print(f"\n🔍 Claude Triggered For User: {user_id} | Character: {character_name}")
 
-        # ✅ 1. Fetch user
+        # ✅ Fetch user
         try:
             user_object_id = ObjectId(user_id)
             user = db.users.find_one({"_id": user_object_id})
         except:
             user = db.users.find_one({"_id": user_id})
 
-        # ✅ 2. Load system prompt
+        # ✅ Load system prompt
         prompt_path = os.path.join("app", "system_prompt", f"{character_name.lower()}.txt")
         if not os.path.isfile(prompt_path):
             raise FileNotFoundError(f"Prompt file '{prompt_path}' not found.")
@@ -39,50 +58,50 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
             system_prompt = system_prompt.replace("{{gender}}", "")
             system_prompt = system_prompt.replace("{{mobileNumber}}", "")
 
-        # ✅ 3. Token limits
-        max_context_tokens = 200000
-        system_tokens = estimate_tokens(system_prompt)
-        prompt_tokens = estimate_tokens(prompt)
-        reserved_output_tokens = 4096
-        remaining_tokens = max_context_tokens - (system_tokens + prompt_tokens + reserved_output_tokens)
+        # ✅ Token budgeting
+        MAX_TOTAL_TOKENS = 100_000
+        RESERVED_OUTPUT_TOKENS = 4096
+        system_tokens = claude_token_count(system_prompt)
+        prompt_tokens = claude_token_count(prompt)
 
-        print(f"🧠 Token Budget → History: {remaining_tokens} tokens")
+        remaining_budget = MAX_TOTAL_TOKENS - system_tokens - prompt_tokens - RESERVED_OUTPUT_TOKENS
 
-        # ✅ 4. Fetch chat history
-        chat_history = list(db.chats.find({
-            "userId": str(user_id),
-            "characterId": str(character_id)
-        }).sort("timestamp", -1))
+        # ✅ Fetch all summaries
+        summary_blocks = fetch_all_summaries(user_id, character_id)
+        print("Summary Blocks", summary_blocks)
+        summary_text = "\n\n".join(summary_blocks)
+        print("Summary Text", summary_text)
+        summary_token_count = claude_token_count(summary_text)
 
+        # Truncate if too large
+        if summary_token_count > remaining_budget:
+            # Keep only what fits
+            truncated = ""
+            total = 0
+            for summary in summary_blocks:
+                t = claude_token_count(summary)
+                if total + t > remaining_budget:
+                    break
+                truncated += summary + "\n\n"
+                total += t
+            summary_text = truncated.strip()
+            summary_token_count = total
+
+        # ✅ Compose messages
         messages = [SystemMessage(content=system_prompt)]
-        total_history_tokens = 0
-        added_messages = 0
 
-        for chat in reversed(chat_history):
-            sender = chat.get("sender", "").lower()
-            text = chat.get("message", "")
-            token_count = estimate_tokens(text)
-
-            if total_history_tokens + token_count > remaining_tokens:
-                break
-
-            if sender == "user":
-                messages.append(HumanMessage(content=text))
-            elif sender == "ai":
-                messages.append(AIMessage(content=text))
-
-            total_history_tokens += token_count
-            added_messages += 1
+        if summary_text:
+            messages.append(HumanMessage(content=f"Here is a summary of our past conversations:\n\n{summary_text}"))
 
         messages.append(HumanMessage(content=prompt))
 
-        print(f"📚 Chat Context → {added_messages} messages, {total_history_tokens} tokens")
+        print(f"📚 Summary Context → {len(summary_blocks)} blocks, {summary_token_count} tokens")
 
-        # ✅ 5. Call Claude
+        # ✅ Claude call
         chat = ChatOpenAI(
-            model="anthropic/claude-3.5-sonnet",
+            model="anthropic/claude-sonnet-4",
             temperature=0.7,
-            max_tokens=4096,
+            max_tokens=RESERVED_OUTPUT_TOKENS,
             openai_api_base="https://openrouter.ai/api/v1",
             openai_api_key=Config.ANTHROPIC_API_KEY,
         )
@@ -90,11 +109,11 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
         print("🤖 Sending to Claude...")
         response = chat.invoke(messages)
         ai_reply = response.content.strip()
-        ai_tokens = estimate_tokens(ai_reply)
+        ai_tokens = claude_token_count(ai_reply)
 
         print(f"✅ Claude Response: {len(ai_reply)} chars (~{ai_tokens} tokens)")
 
-        # ✅ 6. Save AI response
+        # ✅ Save response to DB
         ai_timestamp = datetime.utcnow().isoformat()
         db.chats.insert_one({
             "userId": str(user_id),
@@ -111,9 +130,9 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
             "tokens": {
                 "system_prompt": system_tokens,
                 "user_prompt": prompt_tokens,
-                "chat_history": total_history_tokens,
+                "summary_context": summary_token_count,
                 "output": ai_tokens,
-                "total_used": system_tokens + prompt_tokens + total_history_tokens + ai_tokens
+                "total_used": system_tokens + prompt_tokens + summary_token_count + ai_tokens
             },
             "userId": str(user_id),
             "characterId": str(character_id)

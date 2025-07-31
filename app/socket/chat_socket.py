@@ -3,6 +3,7 @@ from flask import request
 from app.services.db import db
 from datetime import datetime
 from app.services.claude import get_claude_reply
+from app.memory.summary import update_summary_with_new_message
 
 def register_chat_events(socketio: SocketIO):
     print("SocketIO initialized:", socketio)
@@ -86,7 +87,7 @@ def register_chat_events(socketio: SocketIO):
         try:
             timestamp = datetime.utcnow().isoformat()
 
-            # Saving the User Chat to MongoDB
+            # ✅ Save user chat message
             db.chats.insert_one({
                 "userId": str(user_id),
                 "characterId": str(character_id),
@@ -96,6 +97,8 @@ def register_chat_events(socketio: SocketIO):
             })
 
             print(f"✅ User message saved for user {user_id}")
+
+            # Emit chat to sender
             socketio.emit("message_sent", {
                 "userId": user_id,
                 "characterId": character_id,
@@ -104,13 +107,60 @@ def register_chat_events(socketio: SocketIO):
                 "timestamp": timestamp
             }, to=request.sid)
 
+            # 🔔 (No summary update here now)
+
         except Exception as e:
             print(f"❌ Error saving user message: {e}")
             socketio.emit("message_error", {
                 "error": "Failed to save user message"
             }, to=request.sid)
 
-            
+    #Update/Create a Global Summary
+    @socketio.on("summarize_message")
+    def handle_summarize_message(data):
+        user_id = data.get("userId")
+        print(f"User Id{user_id}")
+        character_id = data.get("characterId")
+        print(f"Character Id{character_id}")
+        new_message = data.get("message")
+        print(f"New Message{new_message}")
+
+        if not all([user_id, character_id, new_message]):
+            print("❌ Missing required summary fields.")
+            socketio.emit("summary_error", {
+                "error": "Missing userId, characterId, or message."
+            }, to=request.sid)
+            return
+
+        try:
+            # ✅ Call summary updater
+            updated_summary = update_summary_with_new_message(
+                user_id=user_id,
+                character_id=character_id,
+                new_message=new_message
+            )
+
+            if updated_summary:
+                socketio.emit("summarize_message", {
+                    "userId": user_id,
+                    "characterId": character_id,
+                    "summary": updated_summary
+                }, to=request.sid)
+            else:
+                socketio.emit("summarize_message", {
+                    "userId": user_id,
+                    "characterId": character_id,
+                    "summary": None,
+                    "message": "No summary generated."
+                }, to=request.sid)
+
+        except Exception as e:
+            print(f"❌ Error summarizing message: {e}")
+            socketio.emit("summary_error", {
+                "error": "Failed to summarize message."
+            }, to=request.sid)
+ 
+
     # Socket to Trigger AI Reply 
     @socketio.on("trigger_ai_reply")
     def handle_ai_reply(data):

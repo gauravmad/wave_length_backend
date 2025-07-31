@@ -6,7 +6,7 @@ from app.routes.user_routes import user_bp
 from app.routes.send_otp import send_otp_bp
 from app.routes.verify_otp import verify_otp_bp
 from app.routes.character_routes import character_bp
-from app.routes.test import chat_bp
+from app.routes.chat import chat_bp
 from app.socket.chat_socket import register_chat_events
 
 # Initialize SocketIO without app first
@@ -45,7 +45,7 @@ def create_app():
     app.register_blueprint(send_otp_bp, url_prefix="/api/send-otp")
     app.register_blueprint(verify_otp_bp, url_prefix="/api/verify-otp")
     app.register_blueprint(character_bp,url_prefix="/api/character")
-    app.register_blueprint(chat_bp, url_prefix="/api/test")
+    app.register_blueprint(chat_bp, url_prefix="/api/chat")
 
     # Register custom WebSocket events
     register_chat_events(socketio)
