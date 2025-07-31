@@ -6,7 +6,7 @@ from app.config import Config
 from app.services.db import db
 
 def load_summary_prompt(user_name: str = "User") -> str:
-    print("User Name",user_name)
+    # print("User Name",user_name)
     prompt_path = os.path.join("app", "system_prompt", "summarize.txt")
     if not os.path.isfile(prompt_path):
         raise FileNotFoundError("🛑 summary.txt is missing inside system_prompt folder.")
@@ -21,25 +21,25 @@ def load_summary_prompt(user_name: str = "User") -> str:
     return prompt.strip()
 
 def summarize_incremental(previous_summary: str, new_message: str, user_name: str) -> str:
-    system_prompt = load_summary_prompt(user_name)
+    # Load system prompt from inputsummary.txt
+    prompt_path = os.path.join("app", "system_prompt", "inputsummary.txt")
 
-    # Updated instruction block
-    instructions = (
-        "Please update the structured summary using the new message.\n\n"
-        "Instructions:\n"
-        "- Focus on key emotional events, meaningful details, and relevant themes.\n"
-        "- Avoid greetings, small talk, or filler content.\n"
-        "- Maintain the original structured format with clear bullet points.\n"
-        "- If no significant update is needed, keep the existing points.\n"
-        "- Ensure clarity and conciseness.\n"
-    )
+    if not os.path.exists(prompt_path):
+        raise FileNotFoundError(f"Prompt file not found at: {prompt_path}")
 
+    with open(prompt_path, "r", encoding="utf-8") as f:
+        system_prompt = f.read().strip()
+
+    # Replace placeholder if present
+    system_prompt = system_prompt.replace("{{userName}}", user_name or "User")
+
+    # Human instructions and input
     human_message = (
-        f"{instructions}\n"
         f"Current Summary:\n\n{previous_summary.strip()}\n\n"
         f"New Chat Message:\n{new_message.strip()}"
     )
 
+    # Build message list
     messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=human_message)
@@ -54,8 +54,9 @@ def summarize_incremental(previous_summary: str, new_message: str, user_name: st
     )
 
     response = chat.invoke(messages)
-    print(f"Response from Summarize Incremental: {response}")
+    print(f"🧠 Claude Summary Response: {response}")
     return response.content.strip()
+
 
 def summarize_from_scratch(chats: list, user_name: str) -> str:
     context = ""
@@ -147,5 +148,5 @@ def update_summary_with_new_message(user_id: str, character_id: str, new_message
             }
         }
     )
-    print("✅ Global summary updated.", updated_summary)
+    # print("✅ Global summary updated.", updated_summary)
     return updated_summary

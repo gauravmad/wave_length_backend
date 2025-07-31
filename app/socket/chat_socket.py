@@ -119,11 +119,11 @@ def register_chat_events(socketio: SocketIO):
     @socketio.on("summarize_message")
     def handle_summarize_message(data):
         user_id = data.get("userId")
-        print(f"User Id{user_id}")
+        # print(f"User Id{user_id}")
         character_id = data.get("characterId")
-        print(f"Character Id{character_id}")
+        # print(f"Character Id{character_id}")
         new_message = data.get("message")
-        print(f"New Message{new_message}")
+        # print(f"New Message{new_message}")
 
         if not all([user_id, character_id, new_message]):
             print("❌ Missing required summary fields.")
