@@ -8,12 +8,10 @@ from app.services.db import db
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-
 # ------------------------- Token Counter ------------------------- #
 def claude_token_count(text: str) -> int:
     enc = tiktoken.get_encoding("cl100k_base")
     return len(enc.encode(text))
-
 
 # ------------------------- Global Summary Fetcher ------------------------- #
 def fetch_global_summary(user_id: str, character_id: str) -> str:
@@ -31,20 +29,40 @@ def fetch_global_summary(user_id: str, character_id: str) -> str:
     
     return ""
 
+# ------------------------- Fetch Recent Chats ------------------------- #
+def fetch_recent_chats(user_id: str, character_id: str, limit: int = 20) -> str:
+    """
+    Fetch the most recent `limit` messages between user and AI.
+    Includes both senders. Returns a formatted string.
+    """
+    chat_cursor = db.chats.find(
+        {"userId": str(user_id), "characterId": str(character_id)}
+    ).sort("timestamp", -1).limit(limit)
+
+    chat_docs = list(chat_cursor)  # convert cursor to list
+    print(f"📥 Found {len(chat_docs)} chats")
+
+    messages = []
+    for chat in reversed(chat_docs):  # Reverse for chronological order
+        sender = "You" if chat["sender"] == "human" else "AI"
+        message = chat.get("message", "")
+        messages.append(f"{sender}: {message.strip()}")
+
+    recent_text = "\n".join(messages)
+    print(f"🧾 Recent Conversation Chats:\n{recent_text}")
+    return recent_text
 
 # ------------------------- Claude Invocation ------------------------- #
 def get_claude_reply(prompt: str, user_id: str, character_name: str, character_id: str) -> dict:
     try:
         print(f"\n🔍 Claude Triggered For User: {user_id} | Character: {character_name}")
 
-        # ✅ Fetch user
         try:
             user_object_id = ObjectId(user_id)
             user = db.users.find_one({"_id": user_object_id})
         except:
             user = db.users.find_one({"_id": user_id})
 
-        # ✅ Load system prompt
         prompt_path = os.path.join("app", "system_prompt", f"{character_name.lower()}.txt")
         if not os.path.isfile(prompt_path):
             raise FileNotFoundError(f"Prompt file '{prompt_path}' not found.")
@@ -52,73 +70,59 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
         with open(prompt_path, "r", encoding="utf-8") as f:
             system_prompt = f.read().strip()
 
-        # ✅ Replace user placeholders
-        if user:
-            system_prompt = system_prompt.replace("{{userName}}", user.get("userName", "bestie"))
-            system_prompt = system_prompt.replace("{{gender}}", user.get("gender", ""))
-            system_prompt = system_prompt.replace("{{mobileNumber}}", user.get("mobileNumber", ""))
-        else:
-            system_prompt = system_prompt.replace("{{userName}}", "bestie")
-            system_prompt = system_prompt.replace("{{gender}}", "")
-            system_prompt = system_prompt.replace("{{mobileNumber}}", "")
+        system_prompt = system_prompt.replace("{{userName}}", user.get("userName", "bestie") if user else "bestie")
+        system_prompt = system_prompt.replace("{{gender}}", user.get("gender", "") if user else "")
+        system_prompt = system_prompt.replace("{{mobileNumber}}", user.get("mobileNumber", "") if user else "")
 
-        # ✅ Fetch global summary
+        # Fetch memory and recent messages
         summary_text = fetch_global_summary(user_id, character_id)
-        
-        # ✅ Integrate summary into system prompt
-        if summary_text:
-            # Replace the {{conversationMemory}} placeholder with actual summary
-            final_system_prompt = system_prompt.replace("{{conversationMemory}}", summary_text)
-            print(f"✅ Memory integrated: {claude_token_count(summary_text)} tokens")
-        else:
-            # Remove the memory placeholder if no summary exists
-            final_system_prompt = system_prompt.replace("{{conversationMemory}}", "No previous conversation history available.")
-            print("⚠️ No conversation memory available")
+        recent_chats_text = fetch_recent_chats(user_id, character_id)
 
-        # ✅ Token budgeting
+        enc = tiktoken.get_encoding("cl100k_base")
+        def safe_token_count(text: str) -> int:
+            return len(enc.encode(text))
+
+        summary_final = summary_text or "No previous conversation history available."
+        chats_final = recent_chats_text or "No recent chats available."
+
+        # Insert both into system prompt
+        system_prompt = system_prompt.replace("{{conversationSummary}}", summary_final)
+        system_prompt = system_prompt.replace("{{recentMessages}}", chats_final)
+
+        # Token budgeting
         MAX_TOTAL_TOKENS = 100_000
         RESERVED_OUTPUT_TOKENS = 4096
-        system_tokens = claude_token_count(final_system_prompt)
-        prompt_tokens = claude_token_count(prompt)
 
+        system_tokens = safe_token_count(system_prompt)
+        prompt_tokens = safe_token_count(prompt)
         remaining_budget = MAX_TOTAL_TOKENS - system_tokens - prompt_tokens - RESERVED_OUTPUT_TOKENS
 
-        # Check if we're over budget
         if remaining_budget < 0:
-            print(f"⚠️ Over token budget by {abs(remaining_budget)} tokens. Truncating summary...")
-            # If over budget, truncate the summary
-            if summary_text:
-                # Calculate how much we need to reduce
-                excess = abs(remaining_budget)
-                target_summary_tokens = claude_token_count(summary_text) - excess - 100  # 100 token buffer
-                
-                if target_summary_tokens > 0:
-                    # Truncate summary
-                    enc = tiktoken.get_encoding("cl100k_base")
-                    tokens = enc.encode(summary_text)
-                    truncated_tokens = tokens[:target_summary_tokens]
-                    truncated_summary = enc.decode(truncated_tokens)
-                    
-                    final_system_prompt = system_prompt.replace("{{conversationMemory}}", 
-                        f"[Conversation history truncated]\n\n{truncated_summary}")
-                else:
-                    # Remove summary entirely if too large
-                    final_system_prompt = system_prompt.replace("{{conversationMemory}}", 
-                        "Previous conversation history too large to include.")
-                
-                system_tokens = claude_token_count(final_system_prompt)
+            print(f"⚠️ Over budget by {abs(remaining_budget)} tokens. Truncating...")
 
-        # ✅ Compose messages
-        messages = [SystemMessage(content=final_system_prompt)]
-        messages.append(HumanMessage(content=prompt))
+            # Truncate memory and chats equally
+            summary_tokens = enc.encode(summary_text)
+            chat_tokens = enc.encode(recent_chats_text)
+
+            target_summary_tokens = max(0, len(summary_tokens) - abs(remaining_budget) // 2)
+            target_chat_tokens = max(0, len(chat_tokens) - abs(remaining_budget) // 2)
+
+            truncated_summary = enc.decode(summary_tokens[:target_summary_tokens]) if target_summary_tokens > 0 else "Summary too large to include."
+            truncated_chats = enc.decode(chat_tokens[:target_chat_tokens]) if target_chat_tokens > 0 else "Recent chat history too large to include."
+
+            system_prompt = system_prompt.replace(summary_final, f"[Truncated]\n{truncated_summary}")
+            system_prompt = system_prompt.replace(chats_final, f"[Truncated]\n{truncated_chats}")
+            system_tokens = safe_token_count(system_prompt)
+
+        # Compose Claude messages
+        messages = [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
 
         print(f"📊 Token Usage:")
-        print(f"   System (with memory): {system_tokens}")
-        print(f"   User Prompt: {prompt_tokens}")
-        print(f"   Reserved Output: {RESERVED_OUTPUT_TOKENS}")
-        print(f"   Total Messages: {len(messages)}")
+        print(f"   System: {system_tokens}")
+        print(f"   Prompt: {prompt_tokens}")
+        print(f"   Output Reserved: {RESERVED_OUTPUT_TOKENS}")
 
-        # ✅ Claude call
+        # Claude API call
         chat = ChatOpenAI(
             model="anthropic/claude-sonnet-4",
             temperature=0.7,
@@ -130,11 +134,10 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
         print("🤖 Sending to Claude...")
         response = chat.invoke(messages)
         ai_reply = response.content.strip()
-        ai_tokens = claude_token_count(ai_reply)
+        ai_tokens = safe_token_count(ai_reply)
 
         print(f"✅ Claude Response: {len(ai_reply)} chars (~{ai_tokens} tokens)")
 
-        # ✅ Save response to DB
         ai_timestamp = datetime.utcnow().isoformat()
         db.chats.insert_one({
             "userId": str(user_id),
@@ -151,7 +154,8 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
             "tokens": {
                 "system_prompt": system_tokens,
                 "user_prompt": prompt_tokens,
-                "summary_context": claude_token_count(summary_text) if summary_text else 0,
+                "summary_context": safe_token_count(summary_text or ""),
+                "recent_chats": safe_token_count(recent_chats_text or ""),
                 "output": ai_tokens,
                 "total_used": system_tokens + prompt_tokens + ai_tokens
             },
@@ -162,8 +166,8 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
     except Exception as e:
         import traceback
         traceback.print_exc()
-        error_message = "⚠️ Sorry, I'm having trouble responding right now."
         error_timestamp = datetime.utcnow().isoformat()
+        error_message = "⚠️ Sorry, I'm having trouble responding right now."
 
         try:
             db.chats.insert_one({
