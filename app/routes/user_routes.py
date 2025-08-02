@@ -46,7 +46,9 @@ def register():
             "mobileNumber": user_data["mobileNumber"],
             "mobileNumberVerified": user_data["mobileNumberVerified"],
             "age": user_data["age"],
-            "gender": user_data["gender"]
+            "gender": user_data["gender"],
+            "createdAt":user_data["createdAt"].isoformat(),
+            "updatedAt":user_data["updatedAt"].isoformat()
         }
     }), 201
 
@@ -76,7 +78,9 @@ def login():
             "mobileNumber": user["mobileNumber"],
             "mobileNumberVerified": user.get("mobileNumberVerified", False),
             "age": user["age"],
-            "gender": user["gender"]
+            "gender": user["gender"],
+            "createdAt": user["createdAt"].isoformat() if "createdAt" in user else None,
+            "updatedAt": user["updatedAt"].isoformat() if "updatedAt" in user else None
         }
     }), 200
 
