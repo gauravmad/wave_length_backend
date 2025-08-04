@@ -4,6 +4,7 @@ from langchain_openai import ChatOpenAI
 from langchain.schema import SystemMessage, HumanMessage
 from app.config import Config
 from app.services.db import db
+from pymongo import ReturnDocument
 
 def load_summary_prompt(user_name: str = "User") -> str:
     # print("User Name",user_name)
@@ -91,6 +92,7 @@ def summarize_from_scratch(chats: list, user_name: str) -> str:
 def create_global_summary(user_id: str, character_id: str):
 
     now = datetime.utcnow()
+
     user = db.users.find_one({"_id": user_id}) or {}
     user_name = user.get("userName", "User")
 
@@ -98,18 +100,38 @@ def create_global_summary(user_id: str, character_id: str):
         "userId": user_id,
         "characterId": character_id
     }).sort("timestamp", 1))
+    print(f"{len(chats)} chats fetched")
 
     summary_text = summarize_from_scratch(chats, user_name)
     if not summary_text:
         return
-
-    db.summaries.insert_one({
-        "userId": user_id,
-        "characterId": character_id,
-        "summary": summary_text,
-        "updatedAt": now
+    
+    existing_summary = db.summaries.find_one({
+        "userId":user_id,
+        "characterId":character_id
     })
-    print("✅ Created new global summary.")
+
+    if existing_summary:
+        db.summaries.find_one_and_update(
+            {"_id":existing_summary["_id"]},
+            {
+                "$set":{
+                    "summary":summary_text,
+                    "updatedAt":now
+                }
+            },
+            return_document=ReturnDocument.AFTER
+        )
+        print("🔁 Updated existing global summary.")
+    else:
+        # Insert a new summary
+        db.summaries.insert_one({
+            "userId": user_id,
+            "characterId": character_id,
+            "summary": summary_text,
+            "updatedAt": now
+        })
+        print("✅ Created new global summary.")
     return summary_text
 
 # Extract Summary for the New Message
@@ -150,3 +172,30 @@ def update_summary_with_new_message(user_id: str, character_id: str, new_message
     )
     # print("✅ Global summary updated.", updated_summary)
     return updated_summary
+
+# Compress Summary
+def compress_summary(summary: str) -> str:
+    prompt_path = os.path.join("app", "system_prompt", "compressSummary.txt")
+
+    if not os.path.exists(prompt_path):
+        raise FileNotFoundError(f"Prompt file not found at: {prompt_path}")
+
+    with open(prompt_path, "r", encoding="utf-8") as f:
+        system_prompt = f.read().strip()
+
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=summary)
+    ]
+
+    chat = ChatOpenAI(
+        model="anthropic/claude-sonnet-4",
+        temperature=0.3,
+        max_tokens=1024,
+        openai_api_base="https://openrouter.ai/api/v1",
+        openai_api_key=Config.ANTHROPIC_API_KEY,
+    )
+
+    response = chat.invoke(messages)
+    print(f"🧠 Compressed Summary: {response}")
+    return response.content.strip()

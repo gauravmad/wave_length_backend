@@ -1,9 +1,10 @@
 # app/routes/chat.py
+from datetime import datetime
 from app.services.db import db
 from flask import Blueprint, request, jsonify
 from bson import ObjectId
 from app.services.claude import get_claude_reply
-from app.memory.summary import create_global_summary
+from app.memory.summary import create_global_summary, compress_summary
 
 chat_bp = Blueprint("chat", __name__)
 
@@ -71,3 +72,46 @@ def generate_summary_batches():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500    
+    
+
+@chat_bp.route("/compress-summary", methods=["POST"])
+def compress_summary_route():
+    try:
+        data = request.get_json()
+        user_id = data.get("userId")
+        character_id = data.get("characterId")
+
+        if not user_id or not character_id:
+            return jsonify({"error": "Missing userId or characterId"}), 400
+
+        summary_doc = db.summaries.find_one({
+            "userId": user_id,
+            "characterId": character_id
+        })
+
+        if not summary_doc:
+            return jsonify({"error": "No summary found to compress"}), 404
+
+        existing_summary = summary_doc.get("summary", "")
+        if not existing_summary.strip():
+            return jsonify({"error": "Summary is empty"}), 400
+
+        compressed_summary = compress_summary(existing_summary)
+
+        db.summaries.update_one(
+            {"_id": summary_doc["_id"]},
+            {
+                "$set": {
+                    "summary": compressed_summary,
+                    "updatedAt": datetime.utcnow()
+                }
+            }
+        )
+
+        return jsonify({
+            "message": "Summary compressed successfully",
+            "summary": compressed_summary
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

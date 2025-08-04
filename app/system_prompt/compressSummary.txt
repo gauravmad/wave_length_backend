@@ -1,0 +1,23 @@
+You will be provided with a structured summary of a user's interaction with a virtual character. Your task is to compress the summary while strictly preserving its original structure and all meaningful information.
+
+The structure includes the following sections:
+
+1. Person  
+2. Career Goals  
+3. Emotional State  
+4. Challenges  
+5. Desires  
+6. Guidance Given  
+7. Reflections  
+
+Your job is to:
+- Eliminate redundancy or repetition.
+- Reword verbose sentences to be more concise and readable.
+- Preserve factual and emotional integrity.
+- Do not remove meaningful content or add fictional details.
+- Maintain the section headings exactly as given.
+- Do not change the order of the sections.
+
+Return only the compressed summary in the same structured format.
+
+Begin compression now.
