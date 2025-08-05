@@ -5,58 +5,14 @@ import tiktoken
 
 from app.config import Config
 from app.services.db import db
+from app.socket.controller.chat_controller import save_ai_message
+from app.utility.claude_reply import claude_token_count,fetch_global_summary,fetch_recent_chats
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-# ------------------------- Token Counter ------------------------- #
-def claude_token_count(text: str) -> int:
-    enc = tiktoken.get_encoding("cl100k_base")
-    return len(enc.encode(text))
-
-# ------------------------- Global Summary Fetcher ------------------------- #
-def fetch_global_summary(user_id: str, character_id: str) -> str:
-    """
-    Fetch the global summary for the user-character pair.
-    Returns the summary text or empty string if not found.
-    """
-    summary_doc = db.summaries.find_one({
-        "userId": user_id,
-        "characterId": character_id
-    })
-    
-    if summary_doc and summary_doc.get("summary"):
-        return summary_doc["summary"]
-    
-    return ""
-
-# ------------------------- Fetch Recent Chats ------------------------- #
-def fetch_recent_chats(user_id: str, character_id: str, limit: int = 20) -> str:
-    """
-    Fetch the most recent `limit` messages between user and AI.
-    Includes both senders. Returns a formatted string.
-    """
-    chat_cursor = db.chats.find(
-        {"userId": str(user_id), "characterId": str(character_id)}
-    ).sort("timestamp", -1).limit(limit)
-
-    chat_docs = list(chat_cursor)  # convert cursor to list
-    print(f"📥 Found {len(chat_docs)} chats")
-
-    messages = []
-    for chat in reversed(chat_docs):  # Reverse for chronological order
-        sender = "You" if chat["sender"] == "human" else "AI"
-        message = chat.get("message", "")
-        messages.append(f"{sender}: {message.strip()}")
-
-    recent_text = "\n".join(messages)
-    print(f"🧾 Recent Conversation Chats:\n{recent_text}")
-    return recent_text
-
 # ------------------------- Claude Invocation ------------------------- #
-def get_claude_reply(prompt: str, user_id: str, character_name: str, character_id: str) -> dict:
+def get_claude_reply(prompt: str, user_id: str, character_name: str, character_id: str, image_url:str = None) -> dict:
     try:
-        print(f"\n🔍 Claude Triggered For User: {user_id} | Character: {character_name}")
-
         try:
             user_object_id = ObjectId(user_id)
             user = db.users.find_one({"_id": user_object_id})
@@ -98,9 +54,6 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
         remaining_budget = MAX_TOTAL_TOKENS - system_tokens - prompt_tokens - RESERVED_OUTPUT_TOKENS
 
         if remaining_budget < 0:
-            print(f"⚠️ Over budget by {abs(remaining_budget)} tokens. Truncating...")
-
-            # Truncate memory and chats equally
             summary_tokens = enc.encode(summary_text)
             chat_tokens = enc.encode(recent_chats_text)
 
@@ -114,13 +67,19 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
             system_prompt = system_prompt.replace(chats_final, f"[Truncated]\n{truncated_chats}")
             system_tokens = safe_token_count(system_prompt)
 
-        # Compose Claude messages
-        messages = [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
 
-        print(f"📊 Token Usage:")
-        print(f"   System: {system_tokens}")
-        print(f"   Prompt: {prompt_tokens}")
-        print(f"   Output Reserved: {RESERVED_OUTPUT_TOKENS}")
+        if image_url:
+            messages =[
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=[
+                    {"type":"text","text":prompt},
+                    {"type":"image_url","image_url":{"url":image_url}}
+                ])
+            ]
+        else:
+            messages = [
+                SystemMessage(content=system_prompt), HumanMessage(content=prompt)
+            ]
 
         # Claude API call
         chat = ChatOpenAI(
@@ -131,26 +90,16 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
             openai_api_key=Config.ANTHROPIC_API_KEY,
         )
 
-        print("🤖 Sending to Claude...")
         response = chat.invoke(messages)
         ai_reply = response.content.strip()
         ai_tokens = safe_token_count(ai_reply)
 
-        print(f"✅ Claude Response: {len(ai_reply)} chars (~{ai_tokens} tokens)")
-
-        ai_timestamp = datetime.utcnow().isoformat()
-        db.chats.insert_one({
-            "userId": str(user_id),
-            "characterId": str(character_id),
-            "sender": "ai",
-            "message": ai_reply,
-            "timestamp": ai_timestamp
-        })
+        ai_message_data = save_ai_message(user_id, character_id, ai_reply)
 
         return {
             "success": True,
             "message": ai_reply,
-            "timestamp": ai_timestamp,
+            "timestamp": ai_message_data["timestamp"],
             "tokens": {
                 "system_prompt": system_tokens,
                 "user_prompt": prompt_tokens,
@@ -166,24 +115,14 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
     except Exception as e:
         import traceback
         traceback.print_exc()
-        error_timestamp = datetime.utcnow().isoformat()
         error_message = "⚠️ Sorry, I'm having trouble responding right now."
 
-        try:
-            db.chats.insert_one({
-                "userId": str(user_id),
-                "characterId": str(character_id),
-                "sender": "ai",
-                "message": error_message,
-                "timestamp": error_timestamp
-            })
-        except:
-            pass
+        error_message_data = save_ai_message(user_id, character_id, error_message)
 
         return {
             "success": False,
             "message": error_message,
-            "timestamp": error_timestamp,
+            "timestamp": error_message_data["timestamp"],
             "userId": str(user_id),
             "characterId": str(character_id),
             "error": str(e)

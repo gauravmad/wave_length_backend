@@ -1,7 +1,6 @@
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
 class Config:
@@ -12,3 +11,7 @@ class Config:
     NOVU_TRIGGER_URL=os.getenv("NOVU_TRIGGER_URL")
     SUBSCRIBER_ID=os.getenv("SUBSCRIBER_ID")
     SECRET_KEY=os.getenv("SECRET_KEY")
+    AWS_ACCESS_KEY=os.getenv("AWS_ACCESS_KEY")
+    AWS_SECRET_ACCESS_KEY=os.getenv("AWS_SECRET_ACCESS_KEY")
+    AWS_REGION=os.getenv("AWS_REGION")
+    AWS_S3_BUCKET_NAME=os.getenv("AWS_S3_BUCKET_NAME")

@@ -18,3 +18,7 @@ chromadb
 sentence-transformers
 tiktoken
 openrouter
+openai-whisper
+torch
+ffmpeg-python
+boto3
