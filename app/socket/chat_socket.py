@@ -89,6 +89,58 @@ def register_chat_events(socketio: SocketIO):
                 "error": "Failed to summarize message."
             }, to=request.sid)
 
+    # Gets Image Url saves in MongoDB
+    @socketio.on("upload_image") 
+    def handle_image_upload(data):
+        user_id = data.get("userId")
+        character_id = data.get("characterId")
+        character_name = data.get("characterName")
+        prompt = data.get("message","").strip()
+        image_url = data.get("image_url")    
+
+        if not all([user_id,character_id,character_name,image_url]):
+            print("Missing required image message data")
+            socketio.emit("message_error",{
+                "error":"Missing UserId, CharacterId, CharacterName or Image"  
+            }, to=request.sid)
+            return
+        
+        try:
+            if not prompt:
+                fallback_prompts = [
+                    "Please analyze this image and share your thoughts.",
+                    "What do you observe in this image?",
+                    "Give your insights based on the image.",
+                    "Describe what’s happening in this picture.",
+                    "What can you interpret from this image?"
+                ]
+                prompt = random.choice(fallback_prompts)
+            print(f"Image Upload received from user {user_id}") 
+
+            message_data = save_user_message(
+                user_id=user_id,
+                character_id=character_id,
+                message=prompt,
+                image_url=image_url
+            )   
+
+            # Emit message back to frontend
+            socketio.emit("message_sent", {
+                "userId": message_data["userId"],
+                "characterId": message_data["characterId"],
+                "sender": message_data["sender"],
+                "message": message_data["message"],
+                "timestamp": message_data["timestamp"],
+                "image": message_data.get("image_url")
+            }, to=request.sid)
+
+        except Exception as e:
+            print(f"❌ Error processing uploaded image: {e}")
+            socketio.emit("message_error", {
+                "error": "Failed to process uploaded image."
+            }, to=request.sid)    
+
+
     # Socket to Trigger AI Reply 
     @socketio.on("trigger_ai_reply")
     def handle_ai_reply(data):
