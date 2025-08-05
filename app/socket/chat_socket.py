@@ -21,6 +21,7 @@ def register_chat_events(socketio: SocketIO):
     def handle_disconnect():
         print(f"Client disconnected: {request.sid}")
 
+
     # Socket to Fetch the chat history 
     @socketio.on("fetch_chat_history")
     def handle_fetch_chat_history(data):
@@ -64,6 +65,7 @@ def register_chat_events(socketio: SocketIO):
                 "error": "Failed to save user message"
             }, to=request.sid)
 
+
     #Update/Create a Global Summary
     @socketio.on("summarize_message")
     def handle_summarize_message(data):
@@ -88,6 +90,7 @@ def register_chat_events(socketio: SocketIO):
             socketio.emit("summary_error", {
                 "error": "Failed to summarize message."
             }, to=request.sid)
+
 
     # Gets Image Url saves in MongoDB
     @socketio.on("upload_image") 
@@ -151,7 +154,19 @@ def register_chat_events(socketio: SocketIO):
         image_url = data.get("image_url")
 
         try:
+            if not prompt and image_url:
+                fallback_prompts = [
+                    "Please analyze this image and share your thoughts.",
+                    "What do you observe in this image?",
+                    "Give your insights based on the image.",
+                    "Describe what’s happening in this picture.",
+                    "What can you interpret from this image?"
+                ]
+                prompt = random.choice(fallback_prompts)
+                print(f"📷 Image Upload with no message - using fallback prompt for user {user_id}")
+
             print(f"🤖 AI reply triggered for user {user_id}")
+
             result = get_claude_reply(
                 prompt=prompt,
                 user_id=str(user_id),
