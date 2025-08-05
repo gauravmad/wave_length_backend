@@ -49,6 +49,7 @@ def fetch_chat_history(user_id: str, character_id: str) -> list:
         "characterId": msg["characterId"],
         "sender": msg["sender"],
         "message": msg["message"],
+        "image_url": msg.get("image_url"),  # Will be None if not present
         "timestamp": msg["timestamp"]
     } for msg in messages]
 
