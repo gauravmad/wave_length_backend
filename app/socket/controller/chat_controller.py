@@ -10,12 +10,13 @@ def save_user_message(user_id:str, character_id:str, message:str, image_url:Opti
         "userId":str(user_id),
         "characterId":str(character_id),
         "sender":"user",
-        "message": message,
         "timestamp": timestamp
     }
 
     if image_url:
         message_data["image_url"] = image_url
+    else:
+        message_data["message"] = message    
 
     db.chats.insert_one(message_data)
     return message_data
