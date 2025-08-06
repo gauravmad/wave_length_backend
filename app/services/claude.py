@@ -116,12 +116,13 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
         import traceback
         traceback.print_exc()
         error_message = "⚠️ Sorry, I'm having trouble responding right now."
+        detailed_error = f"{error_message}\n\nError: {str(e)}"
 
         error_message_data = save_ai_message(user_id, character_id, error_message)
 
         return {
             "success": False,
-            "message": error_message,
+            "message": detailed_error,
             "timestamp": error_message_data["timestamp"],
             "userId": str(user_id),
             "characterId": str(character_id),
