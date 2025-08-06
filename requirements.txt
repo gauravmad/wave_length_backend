@@ -22,3 +22,5 @@ openai-whisper
 torch
 ffmpeg-python
 boto3
+Pillow
+pillow-heif
