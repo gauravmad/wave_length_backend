@@ -28,6 +28,7 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
 
         system_prompt = system_prompt.replace("{{userName}}", user.get("userName", "bestie") if user else "bestie")
         system_prompt = system_prompt.replace("{{gender}}", user.get("gender", "") if user else "")
+        system_prompt = system_prompt.replace("{{age}}", user.get("age","") if user else "")
         system_prompt = system_prompt.replace("{{mobileNumber}}", user.get("mobileNumber", "") if user else "")
 
         # Fetch memory and recent messages
