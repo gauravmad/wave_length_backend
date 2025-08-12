@@ -25,3 +25,9 @@ def update_user(user_id, update_data):
         {"_id":ObjectId(user_id)},
         {"$set":update_data}
     )
+
+def get_user_by_id(user_id):
+    try:
+        return db.users.find_one({"_id": ObjectId(user_id)})
+    except Exception:
+        return None

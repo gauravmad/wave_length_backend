@@ -5,6 +5,7 @@ from flask import Blueprint, request, jsonify
 from bson import ObjectId
 from app.services.claude import get_claude_reply
 from app.memory.summary import create_global_summary, compress_summary
+from app.models.users import get_user_by_id
 
 chat_bp = Blueprint("chat", __name__)
 
@@ -116,10 +117,17 @@ def compress_summary_route():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
-
 @chat_bp.route('/get-chats/<user_id>', methods=['GET'])
 def get_chats_by_user(user_id):
     try:
+        # Check if user exists
+        user = get_user_by_id(user_id)
+        if not user:
+            return jsonify({
+                "success":False,
+                "error": "User ID is invalid or user not found"
+            }), 404
+
         # Query only by userId
         query = {"userId": str(user_id)}
 
@@ -131,6 +139,7 @@ def get_chats_by_user(user_id):
             chat["_id"] = str(chat["_id"])
 
         return jsonify({
+            "success":True,
             "count": len(chats),
             "data": chats
         }), 200
