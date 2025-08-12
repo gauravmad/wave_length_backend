@@ -85,8 +85,6 @@ def login():
         }
     }), 200
 
-
-# 📄 Get all users with pagination and search
 @user_bp.route("/", methods=["GET"])
 def get_users():
     try:
@@ -103,8 +101,11 @@ def get_users():
         # Build search query
         search_query = {}
         if search:
-            # Case-insensitive search on userName field
-            search_query["userName"] = {"$regex": search, "$options": "i"}
+            # Search in both userName and mobileNumber
+            search_query["$or"] = [
+                {"userName": {"$regex": search, "$options": "i"}},
+                {"mobileNumber": {"$regex": search, "$options": "i"}}
+            ]
 
         # Total count with search filter
         total_count = db.users.count_documents(search_query)
@@ -114,7 +115,12 @@ def get_users():
         skip = (page - 1) * limit
 
         # Fetch paginated users (latest created first) with search filter
-        users = list(db.users.find(search_query).sort("createdAt", -1).skip(skip).limit(limit))
+        users = list(
+            db.users.find(search_query)
+            .sort("createdAt", -1)
+            .skip(skip)
+            .limit(limit)
+        )
 
         for user in users:
             user["_id"] = str(user["_id"])
