@@ -85,28 +85,36 @@ def login():
         }
     }), 200
 
-# 📄 Get all users with pagination
+
+# 📄 Get all users with pagination and search
 @user_bp.route("/", methods=["GET"])
 def get_users():
     try:
         # Pagination params
         page = int(request.args.get("page", 1))
         limit = int(request.args.get("limit", 10))
+        search = request.args.get("search", "").strip()
 
         if page < 1:
             page = 1
         if limit < 1:
             limit = 10
 
-        # Total count
-        total_count = db.users.count_documents({})
+        # Build search query
+        search_query = {}
+        if search:
+            # Case-insensitive search on userName field
+            search_query["userName"] = {"$regex": search, "$options": "i"}
+
+        # Total count with search filter
+        total_count = db.users.count_documents(search_query)
 
         # Pagination math
-        total_pages = (total_count + limit - 1) // limit
+        total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
         skip = (page - 1) * limit
 
-        # Fetch paginated users (latest created first)
-        users = list(db.users.find().sort("createdAt", -1).skip(skip).limit(limit))
+        # Fetch paginated users (latest created first) with search filter
+        users = list(db.users.find(search_query).sort("createdAt", -1).skip(skip).limit(limit))
 
         for user in users:
             user["_id"] = str(user["_id"])
@@ -119,7 +127,8 @@ def get_users():
             "total_count": total_count,
             "total_pages": total_pages,
             "page": page,
-            "limit": limit
+            "limit": limit,
+            "search": search
         }), 200
 
     except Exception as e:
