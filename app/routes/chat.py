@@ -115,3 +115,25 @@ def compress_summary_route():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+
+@chat_bp.route('/get-chats/<user_id>', methods=['GET'])
+def get_chats_by_user(user_id):
+    try:
+        # Query only by userId
+        query = {"userId": str(user_id)}
+
+        # Fetch chats sorted by timestamp (latest first)
+        chats = list(db.chats.find(query).sort("timestamp", -1))
+
+        # Convert ObjectId to string for JSON
+        for chat in chats:
+            chat["_id"] = str(chat["_id"])
+
+        return jsonify({
+            "count": len(chats),
+            "data": chats
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
