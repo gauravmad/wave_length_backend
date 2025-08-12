@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 import jwt
 import datetime
 from app.config import Config
+from app.services.db import db
 from ..models.users import create_user, get_user_by_mobile, get_all_users
 
 user_bp = Blueprint("user_bp", __name__)
@@ -84,10 +85,45 @@ def login():
         }
     }), 200
 
-# 📄 Optional: Get all users
+# 📄 Get all users with pagination
 @user_bp.route("/", methods=["GET"])
 def get_users():
-    users = get_all_users()
-    for user in users:
-        user["_id"] = str(user["_id"])
-    return jsonify(users)
+    try:
+        # Pagination params
+        page = int(request.args.get("page", 1))
+        limit = int(request.args.get("limit", 10))
+
+        if page < 1:
+            page = 1
+        if limit < 1:
+            limit = 10
+
+        # Total count
+        total_count = db.users.count_documents({})
+
+        # Pagination math
+        total_pages = (total_count + limit - 1) // limit
+        skip = (page - 1) * limit
+
+        # Fetch paginated users (latest created first)
+        users = list(db.users.find().sort("createdAt", -1).skip(skip).limit(limit))
+
+        for user in users:
+            user["_id"] = str(user["_id"])
+            user["createdAt"] = user["createdAt"].isoformat() if "createdAt" in user and user["createdAt"] else None
+            user["updatedAt"] = user["updatedAt"].isoformat() if "updatedAt" in user and user["updatedAt"] else None
+
+        return jsonify({
+            "success": True,
+            "data": users,
+            "total_count": total_count,
+            "total_pages": total_pages,
+            "page": page,
+            "limit": limit
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
