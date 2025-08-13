@@ -1,5 +1,6 @@
 import tiktoken
 from app.services.db import db
+from datetime import datetime
 
 # ------------------------- Token Counter ------------------------- #
 def claude_token_count(text: str) -> int:
@@ -27,10 +28,16 @@ def fetch_recent_chats(user_id: str, character_id: str, limit: int = 20) -> str:
 
     messages = []
     for chat in reversed(chat_docs):
-        sender = "You" if chat["sender"] == "human" else "AI"
-        message = chat.get("message", "")
-        messages.append(f"{sender}: {message.strip()}")
+        sender = "human" if chat["sender"] == "human" else "ai"
+        message = chat.get("message", "").strip()
 
-    recent_text = "\n".join(messages)
-    print(f"🧾 Recent Conversation Chats:\n{recent_text}")
-    return recent_text
+        if "timestamp" in chat and isinstance(chat["timestamp"], datetime):
+            time_str = chat["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            time_str = "Unknown time"
+
+        # For Claude → keep timestamps & sender
+        messages.append(f"[{time_str}] {sender}: {message}")
+
+    return "\n".join(messages)
+
