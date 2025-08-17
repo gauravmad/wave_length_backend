@@ -3,12 +3,11 @@ from datetime import datetime
 from bson import ObjectId
 import tiktoken
 
-from app.config import Config
+import traceback
 from app.services.db import db
 from app.socket.controller.chat_controller import save_ai_message
-from app.utility.claude_reply import claude_token_count,fetch_global_summary,fetch_recent_chats
-from langchain.schema import HumanMessage, AIMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from app.utility.claude_reply import fetch_global_summary,fetch_recent_chats
+from app.services.aws_bedrcok import bedrock_claude
 
 # ------------------------- Claude Invocation ------------------------- #
 def get_claude_reply(prompt: str, user_id: str, character_name: str, character_id: str, image_url:str = None) -> dict:
@@ -47,7 +46,7 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
         system_prompt = system_prompt.replace("{{recentMessages}}", chats_final)
 
         # Token budgeting
-        MAX_TOTAL_TOKENS = 100_000
+        MAX_TOTAL_TOKENS = 200_000
         RESERVED_OUTPUT_TOKENS = 4096
 
         system_tokens = safe_token_count(system_prompt)
@@ -69,31 +68,23 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
             system_tokens = safe_token_count(system_prompt)
 
 
-        if image_url:
-            messages =[
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=[
-                    {"type":"text","text":prompt},
-                    {"type":"image_url","image_url":{"url":image_url}}
-                ])
-            ]
-        else:
-            messages = [
-                SystemMessage(content=system_prompt), HumanMessage(content=prompt)
-            ]
-
-        # Claude API call
-        chat = ChatOpenAI(
-            model="anthropic/claude-sonnet-4",
-            temperature=0.7,
+        bedrock_response = bedrock_claude.invoke_claude(
+            system_prompt=system_prompt,
+            user_prompt=prompt,
+            image_url=image_url,
             max_tokens=RESERVED_OUTPUT_TOKENS,
-            openai_api_base="https://openrouter.ai/api/v1",
-            openai_api_key=Config.ANTHROPIC_API_KEY,
+            temperature=0.7
         )
-
-        response = chat.invoke(messages)
-        ai_reply = response.content.strip()
-        ai_tokens = safe_token_count(ai_reply)
+        
+        if not bedrock_response["success"]:
+            raise Exception(f"Bedrock API Error: {bedrock_response.get('error', 'Unknown error')}")
+        
+        print("")
+        ai_reply = bedrock_response["content"]
+        print(f"Bedrock Response: {ai_reply}")
+        token_info = bedrock_response["tokens"]
+        print("")
+        print(f"Token Info:{token_info}")
 
         ai_message_data = save_ai_message(user_id, character_id, ai_reply)
 
@@ -102,30 +93,37 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
             "message": ai_reply,
             "timestamp": ai_message_data["timestamp"],
             "tokens": {
-                "system_prompt": system_tokens,
-                "user_prompt": prompt_tokens,
+                "system_prompt": token_info["system_prompt"],
+                "user_prompt": token_info["user_prompt"], 
                 "summary_context": safe_token_count(summary_text or ""),
                 "recent_chats": safe_token_count(recent_chats_text or ""),
-                "output": ai_tokens,
-                "total_used": system_tokens + prompt_tokens + ai_tokens
+                "output": token_info["output"],
+                "total_input": token_info["total_input"],
+                "total_output": token_info["total_output"],
+                "total_used": token_info["total_used"]
             },
+            "usage": bedrock_response.get("usage", {}),
             "userId": str(user_id),
             "characterId": str(character_id)
         }
 
     except Exception as e:
-        import traceback
         traceback.print_exc()
+        
         error_message = "⚠️ Sorry, I'm having trouble responding right now."
         detailed_error = f"{error_message}\n\nError: {str(e)}"
 
-        error_message_data = save_ai_message(user_id, character_id, error_message)
+        try:
+            error_message_data = save_ai_message(user_id, character_id, error_message)
+            timestamp = error_message_data["timestamp"]
+        except:
+            timestamp = datetime.now().isoformat()
 
         return {
             "success": False,
             "message": detailed_error,
-            "timestamp": error_message_data["timestamp"],
+            "timestamp": timestamp,
             "userId": str(user_id),
             "characterId": str(character_id),
-            "error": str(e)
+            "error":str(e)
         }

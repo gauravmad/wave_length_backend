@@ -5,6 +5,7 @@ from langchain.schema import SystemMessage, HumanMessage
 from app.config import Config
 from app.services.db import db
 from pymongo import ReturnDocument
+from app.services.aws_bedrcok import bedrock_claude
 
 def load_summary_prompt(user_name: str = "User") -> str:
     # print("User Name",user_name)
@@ -22,70 +23,73 @@ def load_summary_prompt(user_name: str = "User") -> str:
     return prompt.strip()
 
 def summarize_incremental(previous_summary: str, new_message: str, user_name: str) -> str:
-    # Load system prompt from inputsummary.txt
-    prompt_path = os.path.join("app", "system_prompt", "inputsummary.txt")
+    try:
+        # Load system prompt from inputsummary.txt
+        prompt_path = os.path.join("app", "system_prompt", "inputsummary.txt")
 
-    if not os.path.exists(prompt_path):
-        raise FileNotFoundError(f"Prompt file not found at: {prompt_path}")
+        if not os.path.exists(prompt_path):
+            raise FileNotFoundError(f"Prompt file not found at: {prompt_path}")
 
-    with open(prompt_path, "r", encoding="utf-8") as f:
-        system_prompt = f.read().strip()
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            system_prompt = f.read().strip()
 
-    # Replace placeholder if present
-    system_prompt = system_prompt.replace("{{userName}}", user_name or "User")
+        # Replace placeholder if present
+        system_prompt = system_prompt.replace("{{userName}}", user_name or "User")
 
-    # Human instructions and input
-    human_message = (
-        f"Current Summary:\n\n{previous_summary.strip()}\n\n"
-        f"New Chat Message:\n{new_message.strip()}"
-    )
+        # Human instructions and input
+        human_message = (
+            f"Current Summary:\n\n{previous_summary.strip()}\n\n"
+            f"New Chat Message:\n{new_message.strip()}"
+        )
 
-    # Build message list
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=human_message)
-    ]
+        bedrock_response = bedrock_claude.invoke_claude(
+            system_prompt=system_prompt,
+            user_prompt=human_message,
+            max_tokens=2048,
+            temperature=0.4
+        )
 
-    chat = ChatOpenAI(
-        model="anthropic/claude-sonnet-4",
-        temperature=0.4,
-        max_tokens=2048,
-        openai_api_base="https://openrouter.ai/api/v1",
-        openai_api_key=Config.ANTHROPIC_API_KEY,
-    )
-
-    response = chat.invoke(messages)
-    print(f"🧠 Claude Summary Response: {response}")
-    return response.content.strip()
+        if not bedrock_response["success"]:
+            raise Exception(f"Bedrock API Error:{bedrock_response.get('error','Unknown error')}")
+        
+        print(f"Claude Summary Response:{bedrock_response['content']}")
+        return bedrock_response["content"].strip()
+    except Exception as e:
+        print(f"Error in summarize_incremental:{e}")
+        return previous_summary
 
 
 def summarize_from_scratch(chats: list, user_name: str) -> str:
-    context = ""
-    for chat in chats:
-        sender_raw = chat.get("sender", "").lower()
-        sender = "You" if sender_raw == "user" else "Zenny" if sender_raw == "ai" else sender_raw.capitalize()
-        message = chat.get("message", "").strip()
-        if message:
-            context += f"{sender}: {message}\n"
+    try:
+        context = ""
+        for chat in chats:
+            sender_raw = chat.get("sender", "").lower()
+            sender = "You" if sender_raw == "user" else "Zenny" if sender_raw == "ai" else sender_raw.capitalize()
+            message = chat.get("message", "").strip()
+            if message:
+                context += f"{sender}: {message}\n"
 
-    if not context.strip():
-        return ""
+        if not context.strip():
+            return ""
 
-    messages = [
-        SystemMessage(content=load_summary_prompt(user_name)),
-        HumanMessage(content=f"Based on this chat, generate the structured summary:\n\n{context.strip()}")
-    ]
+        system_prompt = load_summary_prompt(user_name)
+        human_message = f"Based on this chat, generate the strutured summary:\n\n\{context.strip()}"
 
-    chat = ChatOpenAI(
-        model="anthropic/claude-sonnet-4",
-        temperature=0.4,
-        max_tokens=2048,
-        openai_api_base="https://openrouter.ai/api/v1",
-        openai_api_key=Config.ANTHROPIC_API_KEY,
-    )
+        bedrock_response = bedrock_claude.invoke_claude(
+            system_prompt=system_prompt,
+            user_prompt=human_message,
+            max_tokens=2048,
+            temperature=0.4
+        )
 
-    response = chat.invoke(messages)
-    return response.content.strip()
+        if not bedrock_response["success"]:
+            raise Exception(f"Bedrock API Error:{bedrock_response.get('error','Unknown error')}")
+
+        return bedrock_response["context"].strip()
+
+    except Exception as e:
+        print(f"Error in summarize_from_scratch: {e}")
+        return "" 
 
 
 # Creates a new Global Summary
@@ -175,27 +179,29 @@ def update_summary_with_new_message(user_id: str, character_id: str, new_message
 
 # Compress Summary
 def compress_summary(summary: str) -> str:
-    prompt_path = os.path.join("app", "system_prompt", "compressSummary.txt")
 
-    if not os.path.exists(prompt_path):
-        raise FileNotFoundError(f"Prompt file not found at: {prompt_path}")
+    try:
+        prompt_path = os.path.join("app", "system_prompt", "compressSummary.txt")
 
-    with open(prompt_path, "r", encoding="utf-8") as f:
-        system_prompt = f.read().strip()
+        if not os.path.exists(prompt_path):
+            raise FileNotFoundError(f"Prompt file not found at: {prompt_path}")
 
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=summary)
-    ]
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            system_prompt = f.read().strip()
 
-    chat = ChatOpenAI(
-        model="anthropic/claude-sonnet-4",
-        temperature=0.3,
-        max_tokens=1024,
-        openai_api_base="https://openrouter.ai/api/v1",
-        openai_api_key=Config.ANTHROPIC_API_KEY,
-    )
+        bedrock_response = bedrock_claude.invoke_claude(
+            system_prompt=system_prompt,
+            user_prompt=summary,
+            max_tokens=1024,
+            temperature=0.3
+        )
 
-    response = chat.invoke(messages)
-    print(f"🧠 Compressed Summary: {response}")
-    return response.content.strip()
+        if not bedrock_response["success"]:
+            raise Exception(f"Bedrock API Error: {bedrock_response.get('error','Unknown error')}")
+
+        print(f"🧠 Compressed Summary: {bedrock_response['content']}")
+        return bedrock_response["content"].strip()
+    
+    except Exception as e:
+        print(f"Error in compress_summary: {e}")
+        return summary
