@@ -3,7 +3,10 @@ import json
 import base64
 import requests
 import tiktoken
+import time
+import random
 from typing import Optional, Dict, Any
+from botocore.exceptions import ClientError
 
 from app.config import Config
 
@@ -15,16 +18,20 @@ class AWSBedrockClaude:
             aws_access_key_id=Config.AWS_ACCESS_KEY_ID,
             aws_secret_access_key=Config.AWS_SECRET_ACCESS_KEY
         )
-        self.model_arn=Config.BEDROCK_MODEL_ARN
-        self.encoding=tiktoken.get_encoding("cl100k_base")
-
-    def safe_token_count(self, text:str) -> int:
+        self.model_arn = Config.BEDROCK_MODEL_ARN
+        self.encoding = tiktoken.get_encoding("cl100k_base")
+        self.last_request_time = 0
+        self.min_request_interval = 0.5  # Minimum 500ms between requests
+    
+    def safe_token_count(self, text: str) -> int:
+        """Safely count tokens in text"""
         try:
             return len(self.encoding.encode(text))
         except Exception:
-            return len(text.split()) * 4
-            
-    def get_image_base64(self,image_url:str) -> tuple[Optional[str],Optional[str]]:
+            return len(text.split()) * 4  # Rough estimate fallback
+    
+    def get_image_base64(self, image_url: str) -> tuple[Optional[str], Optional[str]]:
+        """Download and encode image to base64"""
         try:
             response = requests.get(image_url, timeout=30)
             response.raise_for_status()
@@ -49,7 +56,7 @@ class AWSBedrockClaude:
         except Exception as e:
             print(f"Error downloading image: {e}")
             return None, None
-            
+    
     def create_message_content(self, prompt: str, image_url: Optional[str] = None) -> list:
         """Create message content array for Bedrock API"""
         content = []
@@ -73,8 +80,140 @@ class AWSBedrockClaude:
             "text": prompt
         })
         
-        return content        
+        return content
     
+    def invoke_claude_with_retry(
+        self, 
+        system_prompt: str, 
+        user_prompt: str, 
+        image_url: Optional[str] = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        max_retries: int = 5,
+        base_delay: float = 1.0
+    ) -> Dict[str, Any]:
+        """Invoke Claude via AWS Bedrock with exponential backoff retry"""
+        
+        # Rate limiting: ensure minimum interval between requests
+        current_time = time.time()
+        time_since_last = current_time - self.last_request_time
+        if time_since_last < self.min_request_interval:
+            sleep_time = self.min_request_interval - time_since_last
+            print(f"⏱️ Rate limiting: sleeping {sleep_time:.2f}s")
+            time.sleep(sleep_time)
+        
+        for attempt in range(max_retries + 1):
+            try:
+                self.last_request_time = time.time()
+                
+                # Create user message content
+                user_content = self.create_message_content(user_prompt, image_url)
+                
+                # Prepare request body
+                body = {
+                    "anthropic_version": "bedrock-2023-05-31",
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "system": system_prompt,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": user_content
+                        }
+                    ]
+                }
+                
+                # Calculate token counts for monitoring
+                system_tokens = self.safe_token_count(system_prompt)
+                user_tokens = self.safe_token_count(user_prompt)
+                
+                # Invoke Bedrock
+                response = self.client.invoke_model(
+                    modelId=self.model_arn,
+                    body=json.dumps(body),
+                    contentType="application/json",
+                    accept="application/json"
+                )
+                
+                # Parse response
+                result = json.loads(response['body'].read())
+                
+                # Extract Claude's response
+                ai_reply = result["content"][0]["text"]
+                ai_tokens = self.safe_token_count(ai_reply)
+                
+                # Get usage statistics if available
+                usage_info = result.get("usage", {})
+                input_tokens = usage_info.get("input_tokens", system_tokens + user_tokens)
+                output_tokens = usage_info.get("output_tokens", ai_tokens)
+                
+                return {
+                    "success": True,
+                    "content": ai_reply,
+                    "tokens": {
+                        "system_prompt": system_tokens,
+                        "user_prompt": user_tokens,
+                        "output": output_tokens,
+                        "total_input": input_tokens,
+                        "total_output": output_tokens,
+                        "total_used": input_tokens + output_tokens
+                    },
+                    "usage": usage_info,
+                    "raw_response": result,
+                    "attempts": attempt + 1
+                }
+                
+            except ClientError as e:
+                error_code = e.response['Error']['Code']
+                
+                # Handle throttling specifically
+                if error_code in ['ThrottlingException', 'ServiceQuotaExceededException']:
+                    if attempt < max_retries:
+                        # Exponential backoff with jitter
+                        delay = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
+                        print(f"🔄 Throttled on attempt {attempt + 1}. Retrying in {delay:.2f}s...")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        print(f"❌ Max retries reached for throttling. Error: {str(e)}")
+                        return {
+                            "success": False,
+                            "error": f"Rate limit exceeded after {max_retries} retries: {str(e)}",
+                            "error_code": error_code,
+                            "content": None
+                        }
+                else:
+                    # Non-throttling errors, don't retry
+                    print(f"❌ AWS Bedrock ClientError: {str(e)}")
+                    return {
+                        "success": False,
+                        "error": str(e),
+                        "error_code": error_code,
+                        "content": None
+                    }
+                    
+            except Exception as e:
+                # Generic errors
+                if attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"🔄 Generic error on attempt {attempt + 1}. Retrying in {delay:.2f}s...")
+                    time.sleep(delay)
+                    continue
+                else:
+                    print(f"❌ Error calling AWS Bedrock after {max_retries} retries: {e}")
+                    return {
+                        "success": False,
+                        "error": str(e),
+                        "content": None
+                    }
+        
+        # This shouldn't be reached, but just in case
+        return {
+            "success": False,
+            "error": "Unexpected error in retry logic",
+            "content": None
+        }
+
     def invoke_claude(
         self, 
         system_prompt: str, 
@@ -83,71 +222,14 @@ class AWSBedrockClaude:
         max_tokens: int = 4096,
         temperature: float = 0.7
     ) -> Dict[str, Any]:
-        """Invoke Claude via AWS Bedrock"""
-        try:
-            # Create user message content
-            user_content = self.create_message_content(user_prompt, image_url)
-            
-            # Prepare request body
-            body = {
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "system": system_prompt,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": user_content
-                    }
-                ]
-            }
-            
-            # Calculate token counts for monitoring
-            system_tokens = self.safe_token_count(system_prompt)
-            user_tokens = self.safe_token_count(user_prompt)
-            
-            # Invoke Bedrock
-            response = self.client.invoke_model(
-                modelId=self.model_arn,
-                body=json.dumps(body),
-                contentType="application/json",
-                accept="application/json"
-            )
-            
-            # Parse response
-            result = json.loads(response['body'].read())
-            
-            # Extract Claude's response
-            ai_reply = result["content"][0]["text"]
-            ai_tokens = self.safe_token_count(ai_reply)
-            
-            # Get usage statistics if available
-            usage_info = result.get("usage", {})
-            input_tokens = usage_info.get("input_tokens", system_tokens + user_tokens)
-            output_tokens = usage_info.get("output_tokens", ai_tokens)
-            
-            return {
-                "success": True,
-                "content": ai_reply,
-                "tokens": {
-                    "system_prompt": system_tokens,
-                    "user_prompt": user_tokens,
-                    "output": output_tokens,
-                    "total_input": input_tokens,
-                    "total_output": output_tokens,
-                    "total_used": input_tokens + output_tokens
-                },
-                "usage": usage_info,
-                "raw_response": result
-            }
-            
-        except Exception as e:
-            print(f"Error calling AWS Bedrock: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "content": None
-            }
+        """Invoke Claude via AWS Bedrock (wrapper for retry logic)"""
+        return self.invoke_claude_with_retry(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            image_url=image_url,
+            max_tokens=max_tokens,
+            temperature=temperature
+        )
 
 
 # Global instance
