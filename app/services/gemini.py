@@ -4,7 +4,7 @@ from app.services.db import db
 
 genai.configure(api_key=Config.GEMINI_API_KEY)
 
-with open("app/system_prompt/zenny.txt", "r", encoding="utf-8") as f:
+with open("app/system_prompt/zenny.md", "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read()
 
 def get_gemini_reply(prompt: str, user_id: str) -> str:

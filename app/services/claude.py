@@ -19,7 +19,7 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
         except:
             user = db.users.find_one({"_id": user_id})
 
-        prompt_path = os.path.join("app", "system_prompt", f"{character_name.lower()}.txt")
+        prompt_path = os.path.join("app", "system_prompt", f"{character_name.lower()}.md")
         if not os.path.isfile(prompt_path):
             raise FileNotFoundError(f"Prompt file '{prompt_path}' not found.")
 

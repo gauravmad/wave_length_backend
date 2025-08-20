@@ -1,4 +1,4 @@
-def load_image_prompt(filepath="app/syste_prompt/image_analyzer.txt") -> list[str]:
+def load_image_prompt(filepath="app/syste_prompt/image_analyzer.md") -> list[str]:
     try:
         with open(filepath,"r", encoding="utf-8") as f:
             prompts = [line.strip() for line in f if line.strip()]

@@ -8,9 +8,9 @@ from pymongo import ReturnDocument
 
 def load_summary_prompt(user_name: str = "User") -> str:
     # print("User Name",user_name)
-    prompt_path = os.path.join("app", "system_prompt", "summarize.txt")
+    prompt_path = os.path.join("app", "system_prompt", "summarize.md")
     if not os.path.isfile(prompt_path):
-        raise FileNotFoundError("🛑 summary.txt is missing inside system_prompt folder.")
+        raise FileNotFoundError("🛑 summary.md is missing inside system_prompt folder.")
 
     with open(prompt_path, "r", encoding="utf-8") as file:
         template = file.read()
@@ -23,7 +23,7 @@ def load_summary_prompt(user_name: str = "User") -> str:
 
 def summarize_incremental(previous_summary: str, new_message: str, user_name: str) -> str:
     # Load system prompt from inputsummary.txt
-    prompt_path = os.path.join("app", "system_prompt", "inputsummary.txt")
+    prompt_path = os.path.join("app", "system_prompt", "inputsummary.md")
 
     if not os.path.exists(prompt_path):
         raise FileNotFoundError(f"Prompt file not found at: {prompt_path}")
@@ -175,7 +175,7 @@ def update_summary_with_new_message(user_id: str, character_id: str, new_message
 
 # Compress Summary
 def compress_summary(summary: str) -> str:
-    prompt_path = os.path.join("app", "system_prompt", "compressSummary.txt")
+    prompt_path = os.path.join("app", "system_prompt", "compressSummary.md")
 
     if not os.path.exists(prompt_path):
         raise FileNotFoundError(f"Prompt file not found at: {prompt_path}")
