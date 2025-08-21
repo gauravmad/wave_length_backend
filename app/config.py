@@ -18,6 +18,5 @@ class Config:
 
     AWS_ACCESS_KEY_ID = AWS_ACCESS_KEY
 
-    BEDROCK_MODEL_ARN = os.getenv(
-        'BEDROCK_MODEL_ARN', 
-    )
+    BEDROCK_MODEL_ARN = os.getenv('BEDROCK_MODEL_ARN')
+    AZURE_SUBSCRIPTION_KEY=os.getenv("AZURE_SUBSCRIPTION_KEY")
