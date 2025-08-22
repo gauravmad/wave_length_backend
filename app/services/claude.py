@@ -2,13 +2,26 @@ import os
 from datetime import datetime
 from bson import ObjectId
 import tiktoken
+from openai import AzureOpenAI
 
 from app.config import Config
 from app.services.db import db
 from app.socket.controller.chat_controller import save_ai_message
 from app.utility.claude_reply import claude_token_count,fetch_global_summary,fetch_recent_chats
-from langchain.schema import HumanMessage, AIMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+# from langchain.schema import HumanMessage, AIMessage, SystemMessage
+# from langchain_openai import ChatOpenAI
+
+endpoint = "https://aastha.cognitiveservices.azure.com/"
+model_name = "gpt-4.1"
+deployment = "gpt-4.1"
+subscription_key = Config.AZURE_SUBSCRIPTION_KEY
+api_version = "2024-12-01-preview"
+
+client = AzureOpenAI(
+    api_version=api_version,
+    azure_endpoint=endpoint,
+    api_key=subscription_key
+)
 
 # ------------------------- Claude Invocation ------------------------- #
 def get_claude_reply(prompt: str, user_id: str, character_name: str, character_id: str, image_url:str = None) -> dict:
@@ -70,29 +83,50 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
 
 
         if image_url:
-            messages =[
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=[
-                    {"type":"text","text":prompt},
-                    {"type":"image_url","image_url":{"url":image_url}}
-                ])
+            messages = [
+                {
+                    "role":"system",
+                    "content":system_prompt
+                },
+                {
+                    "role":"user",
+                    "content":[
+                        {
+                            "type":"text",
+                            "text":prompt
+                        },
+                        {
+                            "type":"image_url",
+                            "image_url":{
+                                "url":image_url
+                            }
+                        }
+                    ]
+                }
             ]
         else:
             messages = [
-                SystemMessage(content=system_prompt), HumanMessage(content=prompt)
+                {
+                    "role":"system",
+                    "content":system_prompt
+                },
+                {
+                    "role":"user",
+                    "content":prompt
+                }
             ]
 
-        # Claude API call
-        chat = ChatOpenAI(
-            model="anthropic/claude-sonnet-4",
+        response = client.chat.completions.create(
+            messages=messages,
+            max_completion_tokens=RESERVED_OUTPUT_TOKENS,
             temperature=0.7,
-            max_tokens=RESERVED_OUTPUT_TOKENS,
-            openai_api_base="https://openrouter.ai/api/v1",
-            openai_api_key=Config.ANTHROPIC_API_KEY,
-        )
+            top_p=1.0,
+            frequency_penalty=0.0,
+            presence_penalty=0.0,
+            model=deployment
+        )   
 
-        response = chat.invoke(messages)
-        ai_reply = response.content.strip()
+        ai_reply = response.choices[0].message.content.strip()
         ai_tokens = safe_token_count(ai_reply)
 
         ai_message_data = save_ai_message(user_id, character_id, ai_reply)
