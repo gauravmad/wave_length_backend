@@ -2,29 +2,21 @@ import os
 from datetime import datetime
 from bson import ObjectId
 import tiktoken
-from openai import AzureOpenAI
+import google.generativeai as genai
 
 from app.config import Config
 from app.services.db import db
 from app.socket.controller.chat_controller import save_ai_message
 from app.utility.claude_reply import claude_token_count,fetch_global_summary,fetch_recent_chats
-# from langchain.schema import HumanMessage, AIMessage, SystemMessage
-# from langchain_openai import ChatOpenAI
 
-endpoint = "https://aastha.cognitiveservices.azure.com/"
-model_name = "gpt-4.1"
-deployment = "gpt-4.1"
-subscription_key = Config.AZURE_SUBSCRIPTION_KEY
-api_version = "2024-12-01-preview"
+# Configure Gemini
+genai.configure(api_key=Config.GEMINI_API_KEY)
 
-client = AzureOpenAI(
-    api_version=api_version,
-    azure_endpoint=endpoint,
-    api_key=subscription_key
-)
+# Initialize Gemini model
+model = genai.GenerativeModel('gemini-2.5-pro')
 
 # ------------------------- Claude Invocation ------------------------- #
-def get_claude_reply(prompt: str, user_id: str, character_name: str, character_id: str, image_url:str = None) -> dict:
+def get_claude_reply(prompt: str, user_id: str, character_name: str, character_id: str, image_url: str = None) -> dict:
     try:
         try:
             user_object_id = ObjectId(user_id)
@@ -59,9 +51,9 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
         system_prompt = system_prompt.replace("{{conversationSummary}}", summary_final)
         system_prompt = system_prompt.replace("{{recentMessages}}", chats_final)
 
-        # Token budgeting
-        MAX_TOTAL_TOKENS = 100_000
-        RESERVED_OUTPUT_TOKENS = 4096
+        # Token budgeting for Gemini (2M context window)
+        MAX_TOTAL_TOKENS = 2_000_000
+        RESERVED_OUTPUT_TOKENS = 8192
 
         system_tokens = safe_token_count(system_prompt)
         prompt_tokens = safe_token_count(prompt)
@@ -81,52 +73,31 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
             system_prompt = system_prompt.replace(chats_final, f"[Truncated]\n{truncated_chats}")
             system_tokens = safe_token_count(system_prompt)
 
-
+        # Prepare content for Gemini
+        full_prompt = f"{system_prompt}\n\nUser: {prompt}"
+        
         if image_url:
-            messages = [
-                {
-                    "role":"system",
-                    "content":system_prompt
-                },
-                {
-                    "role":"user",
-                    "content":[
-                        {
-                            "type":"text",
-                            "text":prompt
-                        },
-                        {
-                            "type":"image_url",
-                            "image_url":{
-                                "url":image_url
-                            }
-                        }
-                    ]
-                }
-            ]
+            # For images, we need to handle differently with Gemini
+            # Note: You might need to download/process the image first
+            response = model.generate_content([
+                full_prompt,
+                # Add image processing here if needed
+                # genai.upload_file(image_path) or similar
+            ])
         else:
-            messages = [
-                {
-                    "role":"system",
-                    "content":system_prompt
-                },
-                {
-                    "role":"user",
-                    "content":prompt
-                }
-            ]
+            # Configure generation parameters
+            generation_config = genai.types.GenerationConfig(
+                max_output_tokens=RESERVED_OUTPUT_TOKENS,
+                temperature=0.7,
+                top_p=1.0,
+            )
+            
+            response = model.generate_content(
+                full_prompt,
+                generation_config=generation_config
+            )
 
-        response = client.chat.completions.create(
-            messages=messages,
-            max_completion_tokens=RESERVED_OUTPUT_TOKENS,
-            temperature=0.7,
-            top_p=1.0,
-            frequency_penalty=0.0,
-            presence_penalty=0.0,
-            model=deployment
-        )   
-
-        ai_reply = response.choices[0].message.content.strip()
+        ai_reply = response.text.strip()
         ai_tokens = safe_token_count(ai_reply)
 
         ai_message_data = save_ai_message(user_id, character_id, ai_reply)

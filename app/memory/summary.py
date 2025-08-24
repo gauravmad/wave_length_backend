@@ -1,10 +1,12 @@
 import os
 from datetime import datetime
-from langchain_openai import ChatOpenAI
-from langchain.schema import SystemMessage, HumanMessage
+import google.generativeai as genai
 from app.config import Config
 from app.services.db import db
 from pymongo import ReturnDocument
+
+# Configure Gemini
+genai.configure(api_key=Config.GEMINI_API_KEY)
 
 def load_summary_prompt(user_name: str = "User") -> str:
     # print("User Name",user_name)
@@ -40,23 +42,25 @@ def summarize_incremental(previous_summary: str, new_message: str, user_name: st
         f"New Chat Message:\n{new_message.strip()}"
     )
 
-    # Build message list
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=human_message)
-    ]
+    # Combine system and human message for Gemini
+    full_prompt = f"{system_prompt}\n\n{human_message}"
 
-    chat = ChatOpenAI(
-        model="anthropic/claude-sonnet-4",
+    # Initialize Gemini model
+    model = genai.GenerativeModel('gemini-2.5-pro')
+    
+    # Configure generation parameters
+    generation_config = genai.types.GenerationConfig(
+        max_output_tokens=2048,
         temperature=0.4,
-        max_tokens=2048,
-        openai_api_base="https://openrouter.ai/api/v1",
-        openai_api_key=Config.ANTHROPIC_API_KEY,
     )
 
-    response = chat.invoke(messages)
-    print(f"🧠 Claude Summary Response: {response}")
-    return response.content.strip()
+    response = model.generate_content(
+        full_prompt,
+        generation_config=generation_config
+    )
+    
+    print(f"🧠 Gemini Summary Response: {response.text}")
+    return response.text.strip()
 
 
 def summarize_from_scratch(chats: list, user_name: str) -> str:
@@ -71,21 +75,27 @@ def summarize_from_scratch(chats: list, user_name: str) -> str:
     if not context.strip():
         return ""
 
-    messages = [
-        SystemMessage(content=load_summary_prompt(user_name)),
-        HumanMessage(content=f"Based on this chat, generate the structured summary:\n\n{context.strip()}")
-    ]
+    system_prompt = load_summary_prompt(user_name)
+    human_message = f"Based on this chat, generate the structured summary:\n\n{context.strip()}"
+    
+    # Combine system and human message for Gemini
+    full_prompt = f"{system_prompt}\n\n{human_message}"
 
-    chat = ChatOpenAI(
-        model="anthropic/claude-sonnet-4",
+    # Initialize Gemini model
+    model = genai.GenerativeModel('gemini-2.5-pro')
+    
+    # Configure generation parameters
+    generation_config = genai.types.GenerationConfig(
+        max_output_tokens=2048,
         temperature=0.4,
-        max_tokens=2048,
-        openai_api_base="https://openrouter.ai/api/v1",
-        openai_api_key=Config.ANTHROPIC_API_KEY,
     )
 
-    response = chat.invoke(messages)
-    return response.content.strip()
+    response = model.generate_content(
+        full_prompt,
+        generation_config=generation_config
+    )
+    
+    return response.text.strip()
 
 
 # Creates a new Global Summary
@@ -183,19 +193,21 @@ def compress_summary(summary: str) -> str:
     with open(prompt_path, "r", encoding="utf-8") as f:
         system_prompt = f.read().strip()
 
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=summary)
-    ]
+    full_prompt = f"{system_prompt}\n\n{summary}"
 
-    chat = ChatOpenAI(
-        model="anthropic/claude-sonnet-4",
+    # Initialize Gemini model
+    model = genai.GenerativeModel('gemini-2.5-pro')
+    
+    # Configure generation parameters
+    generation_config = genai.types.GenerationConfig(
+        max_output_tokens=1024,
         temperature=0.3,
-        max_tokens=1024,
-        openai_api_base="https://openrouter.ai/api/v1",
-        openai_api_key=Config.ANTHROPIC_API_KEY,
     )
 
-    response = chat.invoke(messages)
-    print(f"🧠 Compressed Summary: {response}")
-    return response.content.strip()
+    response = model.generate_content(
+        full_prompt,
+        generation_config=generation_config
+    )
+    
+    print(f"🧠 Compressed Summary: {response.text}")
+    return response.text.strip()
