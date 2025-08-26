@@ -8,6 +8,7 @@ from app.routes.verify_otp import verify_otp_bp
 from app.routes.character_routes import character_bp
 from app.routes.analyze_image import upload_image_bp
 # from app.routes.speech_to_text import speech_to_text_bp
+from app.routes.user_analytics import user_analytics_bp
 from app.routes.chat import chat_bp
 from app.socket.chat_socket import register_chat_events
 
@@ -46,9 +47,10 @@ def create_app():
     app.register_blueprint(user_bp, url_prefix="/api/user")
     app.register_blueprint(send_otp_bp, url_prefix="/api/send-otp")
     app.register_blueprint(verify_otp_bp, url_prefix="/api/verify-otp")
-    app.register_blueprint(character_bp,url_prefix="/api/character")
+    # app.register_blueprint(character_bp,url_prefix="/api/character")
     app.register_blueprint(chat_bp, url_prefix="/api/chat")
     app.register_blueprint(upload_image_bp, url_prefix="/api/upload-image")
+    app.register_blueprint(user_analytics_bp, url_prefix="/api/user-analytics")
     # app.register_blueprint(speech_to_text_bp, url_prefix="/api/speech-to-text")
 
     # Register custom WebSocket events
