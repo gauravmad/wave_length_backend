@@ -13,7 +13,7 @@ from app.utility.claude_reply import claude_token_count,fetch_global_summary,fet
 genai.configure(api_key=Config.GEMINI_API_KEY)
 
 # Initialize Gemini model
-model = genai.GenerativeModel('gemini-2.5-pro')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 # ------------------------- Claude Invocation ------------------------- #
 def get_claude_reply(prompt: str, user_id: str, character_name: str, character_id: str, image_url: str = None) -> dict:
