@@ -46,7 +46,7 @@ def summarize_incremental(previous_summary: str, new_message: str, user_name: st
     full_prompt = f"{system_prompt}\n\n{human_message}"
 
     # Initialize Gemini model
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-pro')
     
     # Configure generation parameters
     generation_config = genai.types.GenerationConfig(
@@ -82,7 +82,7 @@ def summarize_from_scratch(chats: list, user_name: str) -> str:
     full_prompt = f"{system_prompt}\n\n{human_message}"
 
     # Initialize Gemini model
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-pro')
     
     # Configure generation parameters
     generation_config = genai.types.GenerationConfig(
@@ -196,7 +196,7 @@ def compress_summary(summary: str) -> str:
     full_prompt = f"{system_prompt}\n\n{summary}"
 
     # Initialize Gemini model
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-pro')
     
     # Configure generation parameters
     generation_config = genai.types.GenerationConfig(
