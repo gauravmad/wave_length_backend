@@ -3,7 +3,7 @@ import jwt
 import datetime
 from app.config import Config
 from app.services.db import db
-from ..models.users import create_user, get_user_by_mobile, get_all_users
+from ..models.users import create_user, get_user_by_mobile, get_user_by_id
 
 user_bp = Blueprint("user_bp", __name__)
 
@@ -142,3 +142,24 @@ def get_users():
             "success": False,
             "error": str(e)
         }), 500
+    
+# ✅ Get User by ID Route
+@user_bp.route("/getuser/<userid>", methods=["GET"])
+def get_user(userid):
+    try:
+        user = get_user_by_id(userid)
+        if not user:
+            return jsonify({"success": False, "message": "User not found"}), 404
+
+        # Convert ObjectId and datetime fields to string
+        user["_id"] = str(user["_id"])
+        user["createdAt"] = user["createdAt"].isoformat() if "createdAt" in user and user["createdAt"] else None
+        user["updatedAt"] = user["updatedAt"].isoformat() if "updatedAt" in user and user["updatedAt"] else None
+
+        return jsonify({
+            "success": True,
+            "data": user
+        }), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
