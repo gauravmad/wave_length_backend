@@ -5,23 +5,24 @@ import base64
 from datetime import datetime
 from bson import ObjectId
 import tiktoken
-import google.generativeai as genai
+import anthropic
 from PIL import Image
 import io
+from dotenv import load_dotenv
 
 from app.config import Config
 from app.services.db import db
 from app.socket.controller.chat_controller import save_ai_message
 from app.utility.claude_reply import claude_token_count, fetch_global_summary, fetch_recent_chats
 
-# Configure Gemini
-genai.configure(api_key=Config.GEMINI_API_KEY)
+# Load environment variables
+load_dotenv()
 
-# Initialize Gemini model
-model = genai.GenerativeModel('gemini-2.5-flash')
+# Configure Anthropic Claude
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY") or Config.ANTHROPIC_API_KEY)
 
 def download_and_process_image(image_url: str) -> dict:
-    """Download image from URL and prepare it for Gemini API"""
+    """Download image from URL and prepare it for Claude API"""
     try:
         # Download the image
         response = requests.get(image_url, timeout=30)
@@ -43,35 +44,15 @@ def download_and_process_image(image_url: str) -> dict:
         image.save(img_buffer, format='JPEG', quality=85)
         img_data = img_buffer.getvalue()
         
+        # Encode to base64 for Claude
+        img_base64 = base64.b64encode(img_data).decode('utf-8')
+        
         return {
-            "data": img_data,
+            "data": img_base64,
             "mime_type": "image/jpeg"
         }
     except Exception as e:
         print(f"Error processing image: {e}")
-        return None
-
-def upload_image_to_gemini_file_api(image_url: str) -> str:
-    """Alternative: Upload image to Gemini File API and return file URI"""
-    try:
-        # Download the image
-        response = requests.get(image_url, timeout=30)
-        response.raise_for_status()
-        
-        # Save temporarily
-        temp_path = f"/tmp/temp_image_{int(time.time())}.jpg"
-        with open(temp_path, 'wb') as f:
-            f.write(response.content)
-        
-        # Upload to Gemini File API
-        uploaded_file = genai.upload_file(path=temp_path, mime_type="image/jpeg")
-        
-        # Clean up temp file
-        os.remove(temp_path)
-        
-        return uploaded_file.uri
-    except Exception as e:
-        print(f"Error uploading to Gemini File API: {e}")
         return None
 
 def get_claude_reply(prompt: str, user_id: str, character_name: str, character_id: str, image_url: str = None) -> dict:
@@ -128,8 +109,8 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
         system_prompt = system_prompt.replace("{{recentMessages}}", chats_final)
         log_step("Finalize system prompt with summary + chats")
 
-        # --- Token budgeting ---
-        MAX_TOTAL_TOKENS = 2_000_000
+        # --- Token budgeting (Claude Sonnet 4 has 200K context window) ---
+        MAX_TOTAL_TOKENS = 200_000
         RESERVED_OUTPUT_TOKENS = 8192
         system_tokens = safe_token_count(system_prompt)
         prompt_tokens = safe_token_count(prompt)
@@ -161,44 +142,43 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
                 print(f"Warning: Failed to process image from {image_url}")
         log_step("Process image" if image_url else "Skip image processing")
 
-        # --- Prepare Gemini input ---
-        full_prompt = f"{system_prompt}\n\nUser: {prompt}"
-
+        # --- Prepare Claude message content ---
+        message_content = []
+        
+        # Add text content
+        message_content.append({
+            "type": "text",
+            "text": prompt
+        })
+        
+        # Add image content if available
         if image_data:
-            # Method 1: Using inline data (recommended for most cases)
-            response = model.generate_content(
-                contents=[
-                    {
-                        "parts": [
-                            {"text": full_prompt},
-                            {
-                                "inline_data": {
-                                    "mime_type": image_data["mime_type"],
-                                    "data": base64.b64encode(image_data["data"]).decode('utf-8')
-                                }
-                            }
-                        ]
-                    }
-                ],
-                generation_config=genai.types.GenerationConfig(
-                    max_output_tokens=RESERVED_OUTPUT_TOKENS,
-                    temperature=0.7,
-                    top_p=1.0,
-                )
-            )
-        else:
-            response = model.generate_content(
-                contents=[{"parts": [{"text": full_prompt}]}],
-                generation_config=genai.types.GenerationConfig(
-                    max_output_tokens=RESERVED_OUTPUT_TOKENS,
-                    temperature=0.7,
-                    top_p=1.0,
-                )
-            )
-        log_step("Gemini API call")
+            message_content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": image_data["mime_type"],
+                    "data": image_data["data"]
+                }
+            })
+
+        # --- Claude API call ---
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=RESERVED_OUTPUT_TOKENS,
+            temperature=0.7,
+            system=system_prompt,
+            messages=[
+                {
+                    "role": "user",
+                    "content": message_content
+                }
+            ]
+        )
+        log_step("Claude API call")
 
         # --- Process AI reply ---
-        ai_reply = response.text.strip()
+        ai_reply = response.content[0].text.strip()
         ai_tokens = safe_token_count(ai_reply)
         log_step("Process AI reply")
 
@@ -220,6 +200,30 @@ def get_claude_reply(prompt: str, user_id: str, character_name: str, character_i
             },
             "userId": str(user_id),
             "characterId": str(character_id),
+            "timings": timings,
+            "model_info": {
+                "model": "claude-sonnet-4-20250514",
+                "input_tokens": response.usage.input_tokens if hasattr(response, 'usage') else None,
+                "output_tokens": response.usage.output_tokens if hasattr(response, 'usage') else None
+            }
+        }
+
+    except anthropic.APIError as e:
+        import traceback
+        traceback.print_exc()
+        error_message = "⚠️ Sorry, I'm having trouble responding right now due to API issues."
+        detailed_error = f"{error_message}\n\nAPI Error: {str(e)}"
+
+        error_message_data = save_ai_message(user_id, character_id, error_message)
+        log_step("API Error handling")
+
+        return {
+            "success": False,
+            "message": detailed_error,
+            "timestamp": error_message_data["timestamp"],
+            "userId": str(user_id),
+            "characterId": str(character_id),
+            "error": f"API Error: {str(e)}",
             "timings": timings
         }
 
