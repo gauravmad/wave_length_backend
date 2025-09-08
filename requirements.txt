@@ -24,3 +24,7 @@ ffmpeg-python
 boto3
 Pillow
 pillow-heif
+mem0ai
+chromadb
+qdrant-client
+google-genai
