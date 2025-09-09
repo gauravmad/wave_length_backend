@@ -110,6 +110,114 @@ def calculate_user_sessions(user_id, session_gap_minutes=30):
         "totalDurationMinutes": round(total_duration, 2)
     }
 
+def calculate_user_sessions_with_chats(user_id, session_gap_minutes=30):
+    """Calculate sessions for a specific user with detailed chat information"""
+    
+    # Get all chats for the user, sorted by timestamp
+    chats = list(db.chats.find(
+        {"userId": user_id}
+    ).sort("timestamp", 1))
+    
+    if not chats:
+        return {
+            "userId": user_id,
+            "totalChats": 0,
+            "totalSessions": 0,
+            "sessions": [],
+            "totalDurationMinutes": 0
+        }
+    
+    sessions = []
+    session_gap_seconds = session_gap_minutes * 60
+    
+    current_session_chats = []
+    
+    for i, chat in enumerate(chats):
+        chat_time = parse_timestamp(chat["timestamp"])
+        
+        if i == 0:
+            # First chat starts the first session
+            current_session_chats = [chat]
+        else:
+            # Check gap between current chat and previous chat
+            prev_chat_time = parse_timestamp(chats[i-1]["timestamp"])
+            time_gap = (chat_time - prev_chat_time).total_seconds()
+            
+            if time_gap <= session_gap_seconds:
+                # Continue current session
+                current_session_chats.append(chat)
+            else:
+                # Gap is too large, finalize current session and start new one
+                if current_session_chats:
+                    sessions.append(current_session_chats)
+                
+                # Start new session with current chat
+                current_session_chats = [chat]
+    
+    # Don't forget the last session
+    if current_session_chats:
+        sessions.append(current_session_chats)
+    
+    # Format sessions for response with detailed chat information
+    formatted_sessions = []
+    total_duration = 0
+    
+    for session_idx, session_chats in enumerate(sessions):
+        if not session_chats:
+            continue
+            
+        start_time = parse_timestamp(session_chats[0]["timestamp"])
+        end_time = parse_timestamp(session_chats[-1]["timestamp"])
+        
+        # Calculate session duration (from first chat to last chat)
+        session_duration = (end_time - start_time).total_seconds() / 60
+        
+        # Format chat details for this session
+        formatted_chats = []
+        user_message_count = 0
+        bot_message_count = 0
+        
+        for chat in session_chats:
+            sender = chat.get("sender", "User")
+            if sender.lower() == "user":
+                user_message_count += 1
+            else:
+                bot_message_count += 1
+                
+            formatted_chats.append({
+                "chatId": str(chat["_id"]),
+                "message": chat.get("message", ""),
+                "sender": sender
+            })
+        
+        # Calculate session statistics
+        total_characters = sum(len(chat.get("message", "")) for chat in session_chats)
+        avg_message_length = total_characters / len(session_chats) if session_chats else 0
+        
+        formatted_session = {
+            "sessionId": session_idx + 1,
+            "startTime": start_time.isoformat(),
+            "endTime": end_time.isoformat(),
+            "chatCount": len(session_chats),
+            "userMessages": user_message_count,
+            "botMessages": bot_message_count,
+            "durationMinutes": round(session_duration, 2),
+            "chats": formatted_chats  # Include all chat details
+        }
+        
+        formatted_sessions.append(formatted_session)
+        total_duration += session_duration
+    
+    return {
+        "userId": user_id,
+        "totalChats": len(chats),
+        "totalSessions": len(sessions),
+        "sessions": formatted_sessions,
+        "totalDurationMinutes": round(total_duration, 2),
+        "avgSessionDuration": round(total_duration / len(sessions), 2) if sessions else 0,
+        "avgChatsPerSession": round(len(chats) / len(sessions), 2) if sessions else 0
+    }
+
 @user_analytics_bp.route('/sessions', methods=['GET'])
 def get_all_users_sessions():
     """
@@ -117,11 +225,22 @@ def get_all_users_sessions():
     Query params:
     - session_gap: minutes between chats to consider new session (default: 30)
     - user_id: specific user ID (optional)
+    - include_chats: include detailed chat information in sessions (default: false)
+    - limit: limit number of users returned (optional)
+    - skip: skip number of users for pagination (optional)
     """
     
     try:
         session_gap = int(request.args.get('session_gap', 30))
         specific_user_id = request.args.get('user_id')
+        include_chats = request.args.get('include_chats', 'false').lower() == 'true'
+        limit = request.args.get('limit')
+        skip = request.args.get('skip', 0)
+        
+        if limit:
+            limit = int(limit)
+        if skip:
+            skip = int(skip)
         
         if specific_user_id:
             # Get specific user data
@@ -129,35 +248,55 @@ def get_all_users_sessions():
             if not user:
                 return jsonify({"error": "User not found"}), 404
             
-            user_session_data = calculate_user_sessions(specific_user_id, session_gap)
+            # Use detailed function if chats are requested, otherwise use original
+            if include_chats:
+                user_session_data = calculate_user_sessions_with_chats(specific_user_id, session_gap)
+            else:
+                user_session_data = calculate_user_sessions(specific_user_id, session_gap)
             
             # Add user info
             user_session_data.update({
                 "userName": user.get("userName"),
                 "mobileNumber": user.get("mobileNumber"),
                 "age": user.get("age"),
-                "gender": user.get("gender")
+                "gender": user.get("gender"),
+                "createdAt": user.get("createdAt"),
+                "lastActiveAt": user.get("lastActiveAt")
             })
             
             return jsonify({
                 "success": True,
+                "includeChats": include_chats,
                 "data": user_session_data
             })
         
-        # Get all users
-        users = list(db.users.find())
+        # Get all users with pagination
+        users_query = db.users.find()
+        if skip:
+            users_query = users_query.skip(skip)
+        if limit:
+            users_query = users_query.limit(limit)
+            
+        users = list(users_query)
         all_users_sessions = []
         
         for user in users:
             user_id = str(user["_id"])
-            user_session_data = calculate_user_sessions(user_id, session_gap)
+            
+            # Use appropriate function based on include_chats parameter
+            if include_chats:
+                user_session_data = calculate_user_sessions_with_chats(user_id, session_gap)
+            else:
+                user_session_data = calculate_user_sessions(user_id, session_gap)
             
             # Add user info
             user_session_data.update({
                 "userName": user.get("userName"),
                 "mobileNumber": user.get("mobileNumber"),
                 "age": user.get("age"),
-                "gender": user.get("gender")
+                "gender": user.get("gender"),
+                "createdAt": user.get("createdAt"),
+                "lastActiveAt": user.get("lastActiveAt")
             })
             
             all_users_sessions.append(user_session_data)
@@ -165,16 +304,75 @@ def get_all_users_sessions():
         # Sort by total chats descending
         all_users_sessions.sort(key=lambda x: x["totalChats"], reverse=True)
         
+        # Get total count for pagination info
+        total_users = db.users.count_documents({})
+        
         return jsonify({
             "success": True,
             "totalUsers": len(all_users_sessions),
+            "totalUsersInDB": total_users,
             "sessionGapMinutes": session_gap,
+            "includeChats": include_chats,
+            "pagination": {
+                "skip": skip,
+                "limit": limit,
+                "hasMore": (skip + len(all_users_sessions)) < total_users if limit else False
+            },
             "data": all_users_sessions
         })
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Additional endpoint for getting detailed session information for a specific session
+@user_analytics_bp.route('/session-details', methods=['GET'])
+def get_session_details():
+    """
+    Get detailed information for a specific session
+    Query params:
+    - user_id: required
+    - session_id: session number (1-based index)
+    - session_gap: minutes between chats to consider new session (default: 30)
+    """
+    
+    try:
+        user_id = request.args.get('user_id')
+        session_id = request.args.get('session_id')
+        session_gap = int(request.args.get('session_gap', 30))
+        
+        if not user_id or not session_id:
+            return jsonify({"error": "user_id and session_id are required"}), 400
+        
+        session_id = int(session_id)
+        
+        # Get user sessions with chats
+        user_session_data = calculate_user_sessions_with_chats(user_id, session_gap)
+        
+        # Find the specific session
+        target_session = None
+        for session in user_session_data["sessions"]:
+            if session["sessionId"] == session_id:
+                target_session = session
+                break
+        
+        if not target_session:
+            return jsonify({"error": f"Session {session_id} not found for user {user_id}"}), 404
+        
+        # Get user info
+        user = db.users.find_one({"_id": ObjectId(user_id)})
+        
+        return jsonify({
+            "success": True,
+            "userData": {
+                "userId": user_id,
+                "userName": user.get("userName") if user else None,
+                "mobileNumber": user.get("mobileNumber") if user else None
+            },
+            "sessionData": target_session
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 def get_user_activity_days(user_id, days_back=30):
     """Get days when user was active (had chats)"""
