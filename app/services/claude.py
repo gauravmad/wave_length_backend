@@ -244,12 +244,13 @@ Time gap summary: New conversation started
         # --- Add timestamp information to system prompt ---
         system_prompt = system_prompt.replace("{{timestampInfo}}", timestamp_info.strip())
 
-        
         log_step("Inject user details and timestamp info into system prompt")
 
         # --- Fetch memory and recent chats ---
         summary_text = fetch_global_summary(user_id, character_id)
         recent_chats_text = fetch_recent_chats(user_id, character_id)
+        print("")
+        print(f"Recent Chats: {recent_chats_text}")
         log_step("Fetch memory + recent chats")
 
         # --- Token encoding setup ---
@@ -267,47 +268,95 @@ Time gap summary: New conversation started
 
         # --- Token budgeting (Claude Sonnet 4 has 200K context window) ---
         MAX_TOTAL_TOKENS = 200_000
-        RESERVED_OUTPUT_TOKENS = 8192
+        # Remove fixed output reservation - let Claude manage dynamically
         system_tokens = safe_token_count(system_prompt)
         prompt_tokens = safe_token_count(prompt)
+        
+        # Calculate if we need truncation (leave small buffer for safety)
+        SAFETY_BUFFER = 1000  # Small safety margin
+        remaining_budget = MAX_TOTAL_TOKENS - system_tokens - prompt_tokens - SAFETY_BUFFER
+        
         log_step("Token count + budgeting")
 
-        # --- Handle truncation if needed ---
-        remaining_budget = MAX_TOTAL_TOKENS - system_tokens - prompt_tokens - RESERVED_OUTPUT_TOKENS
+        print(f"\n🔍 TOKEN ANALYSIS:")
+        print(f"Max context window: {MAX_TOTAL_TOKENS:,} tokens")
+        print(f"System prompt tokens: {system_tokens:,}")
+        print(f"User prompt tokens: {prompt_tokens:,}")
+        print(f"Safety buffer: {SAFETY_BUFFER:,}")
+        print(f"Available for context: {remaining_budget:,}")
+        print(f"Summary text tokens: {safe_token_count(summary_text or ''):,}")
+        print(f"Recent chats tokens: {safe_token_count(recent_chats_text or ''):,}")
+
+        # --- Handle truncation if needed (IMPROVED LOGIC) ---
+        truncation_occurred = False
         if remaining_budget < 0:
-            summary_tokens = enc.encode(summary_text)
-            chat_tokens = enc.encode(recent_chats_text)
-
-            target_summary_tokens = max(0, len(summary_tokens) - abs(remaining_budget) // 2)
-            target_chat_tokens = max(0, len(chat_tokens) - abs(remaining_budget) // 2)
-
-            truncated_summary = enc.decode(summary_tokens[:target_summary_tokens]) if target_summary_tokens > 0 else "Summary too large to include."
-            truncated_chats = enc.decode(chat_tokens[:target_chat_tokens]) if target_chat_tokens > 0 else "Recent chat history too large to include."
-
-            system_prompt = system_prompt.replace(summary_final, f"[Truncated]\n{truncated_summary}")
-            system_prompt = system_prompt.replace(chats_final, f"[Truncated]\n{truncated_chats}")
+            truncation_occurred = True
+            print(f"\n⚠️ TRUNCATION NEEDED! Over by {abs(remaining_budget):,} tokens")
+            
+            summary_tokens = enc.encode(summary_text or "")
+            chat_tokens = enc.encode(recent_chats_text or "")
+            tokens_to_cut = abs(remaining_budget)
+            
+            # PRIORITIZE RECENT CHATS OVER SUMMARY
+            if len(summary_tokens) >= tokens_to_cut:
+                # Cut from summary only - preserve ALL recent chats
+                target_summary_tokens = len(summary_tokens) - tokens_to_cut
+                target_chat_tokens = len(chat_tokens)  # Keep everything
+                
+                truncated_summary = enc.decode(summary_tokens[:target_summary_tokens]) if target_summary_tokens > 0 else ""
+                truncated_chats = recent_chats_text or "No recent chats available."
+                
+                print(f"✅ Strategy: Cut {tokens_to_cut:,} tokens from summary only")
+                print(f"Summary: {len(summary_tokens):,} → {target_summary_tokens:,} tokens")
+                print(f"Recent chats: PRESERVED ({len(chat_tokens):,} tokens)")
+                
+            else:
+                # Cut entire summary + some chats (last resort)
+                remaining_to_cut = tokens_to_cut - len(summary_tokens)
+                target_summary_tokens = 0
+                target_chat_tokens = max(0, len(chat_tokens) - remaining_to_cut)
+                
+                truncated_summary = ""
+                truncated_chats = enc.decode(chat_tokens[:target_chat_tokens]) if target_chat_tokens > 0 else "Recent chats truncated due to context limits."
+                
+                print(f"⚠️ Strategy: Remove summary + cut {remaining_to_cut:,} chat tokens")
+                print(f"Summary: REMOVED ({len(summary_tokens):,} tokens)")
+                print(f"Recent chats: {len(chat_tokens):,} → {target_chat_tokens:,} tokens")
+            
+            # Update system prompt with truncated content
+            if target_summary_tokens > 0:
+                system_prompt = system_prompt.replace(summary_final, f"[Summary truncated to fit context]\n{truncated_summary}")
+            else:
+                system_prompt = system_prompt.replace(summary_final, "[Summary removed to preserve recent chat history]")
+                
+            if target_chat_tokens > 0:
+                system_prompt = system_prompt.replace(chats_final, f"[Recent chats (showing last {target_chat_tokens} tokens)]\n{truncated_chats}")
+            else:
+                system_prompt = system_prompt.replace(chats_final, "[Recent chats truncated due to context limits]")
+            
             system_tokens = safe_token_count(system_prompt)
-        log_step("Truncate context if needed")
+            print(f"Final system tokens after truncation: {system_tokens:,}")
+        
+        else:
+            print(f"✅ No truncation needed! Using {system_tokens + prompt_tokens:,}/{MAX_TOTAL_TOKENS:,} tokens")
+        
+        log_step("Handle truncation if needed")
 
         # --- Process image if provided ---
         image_data = None
         if image_url:
             image_data = download_and_process_image(image_url)
             if not image_data:
-                # If image processing fails, continue without image
                 print(f"Warning: Failed to process image from {image_url}")
         log_step("Process image" if image_url else "Skip image processing")
 
         # --- Prepare Claude message content ---
         message_content = []
-        
-        # Add text content
         message_content.append({
             "type": "text",
             "text": prompt
         })
         
-        # Add image content if available
         if image_data:
             message_content.append({
                 "type": "image",
@@ -321,7 +370,7 @@ Time gap summary: New conversation started
         # --- Claude API call ---
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=RESERVED_OUTPUT_TOKENS,
+            max_tokens=8192,  # Reasonable upper limit
             temperature=0.7,
             system=system_prompt,
             messages=[
@@ -362,7 +411,8 @@ Time gap summary: New conversation started
                 "input_tokens": response.usage.input_tokens if hasattr(response, 'usage') else None,
                 "output_tokens": response.usage.output_tokens if hasattr(response, 'usage') else None
             },
-            "timestamp_info": timestamp_info.strip()  # Include timestamp info in response
+            "timestamp_info": timestamp_info.strip(),
+            "truncation_occurred": truncation_occurred
         }
 
     except anthropic.APIError as e:

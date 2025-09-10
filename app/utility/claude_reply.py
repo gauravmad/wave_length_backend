@@ -31,6 +31,7 @@ def fetch_recent_chats(user_id: str, character_id: str, limit: int = 20) -> str:
         ).sort("timestamp", -1).limit(limit)
 
         chat_docs = list(chat_cursor)
+        print(f"Chats Docs: {chat_docs}")
         
         # Handle case where no chats exist
         if not chat_docs:
@@ -44,14 +45,34 @@ def fetch_recent_chats(user_id: str, character_id: str, limit: int = 20) -> str:
             if not message:  # Skip empty messages
                 continue
 
-            # Format timestamp
-            if "timestamp" in chat and isinstance(chat["timestamp"], datetime):
-                time_str = chat["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
-                # Format message for Claude
-                messages.append(f"[{time_str}] {sender}: {message}")
+            # Handle timestamp - check if it's a string or datetime object
+            timestamp_str = None
+            if "timestamp" in chat:
+                timestamp = chat["timestamp"]
+                
+                if isinstance(timestamp, datetime):
+                    # It's already a datetime object
+                    timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                elif isinstance(timestamp, str):
+                    try:
+                        # Parse the ISO format string and format it
+                        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                        timestamp_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        # If parsing fails, use the original string
+                        timestamp_str = timestamp
+                
+                if timestamp_str:
+                    # Format message for Claude
+                    messages.append(f"[{timestamp_str}] {sender}: {message}")
+                else:
+                    # Include message without timestamp if timestamp parsing fails
+                    messages.append(f"{sender}: {message}")
             else:
-                # Skip messages without valid timestamps
-                continue
+                # Include message without timestamp if no timestamp field
+                messages.append(f"{sender}: {message}")
+
+        print(f"Messages: {messages}")    
 
         return "\n".join(messages) if messages else "No valid messages found."
         
