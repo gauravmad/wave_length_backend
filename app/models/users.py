@@ -31,3 +31,10 @@ def get_user_by_id(user_id):
         return db.users.find_one({"_id": ObjectId(user_id)})
     except Exception:
         return None
+    
+#Add this function to your models/users.py file
+
+def get_user_by_email(email):
+    """Get user by email address"""
+    from app.services.db import db
+    return db.users.find_one({"email": email.lower()})    
