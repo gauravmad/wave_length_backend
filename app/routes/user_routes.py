@@ -24,27 +24,29 @@ def validate_email(email):
 @user_bp.route("/register", methods=["POST"])
 def register():
     data = request.get_json()
-    required_fields = ["userName", "mobileNumber", "email", "mobileNumberVerified", "age", "gender"]
+    required_fields = ["userName", "mobileNumber", "mobileNumberVerified", "age", "gender"]
     
     if not all(field in data for field in required_fields):
         return jsonify({"error": "Missing required fields"}), 400
 
-    # Validate email format
-    if not validate_email(data["email"]):
-        return jsonify({"error": "Invalid email format"}), 400
+    # Validate email format only if email is provided
+    if "email" in data and data["email"]:
+        if not validate_email(data["email"]):
+            return jsonify({"error": "Invalid email format"}), 400
 
     # Check if user already exists by mobile number
     if get_user_by_mobile(data["mobileNumber"]):
         return jsonify({"success": False, "message": "User with this mobile number already exists"}), 409
 
-    # Check if user already exists by email
-    if get_user_by_email(data["email"]):
-        return jsonify({"success": False, "message": "User with this email already exists"}), 409
+    # Check if user already exists by email only if email is provided
+    if "email" in data and data["email"]:
+        if get_user_by_email(data["email"]):
+            return jsonify({"success": False, "message": "User with this email already exists"}), 409
 
     user_data = {
         "userName": data["userName"],
         "mobileNumber": data["mobileNumber"],
-        "email": data["email"].lower(),  # Store email in lowercase
+        "email": data.get("email", "").lower() if data.get("email") else "",  # Store email in lowercase if provided
         "mobileNumberVerified": data["mobileNumberVerified"],
         "emailVerified": data.get("emailVerified", False),  # Optional field with default
         "age": data["age"],
