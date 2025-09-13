@@ -259,6 +259,7 @@ def calculate_user_sessions_with_chats(user_id, session_gap_minutes=30):
         "avgChatsPerSession": round(len(chats) / len(sessions), 2) if sessions else 0
     }
 
+
 @user_analytics_bp.route('/sessions', methods=['GET'])
 def get_all_users_sessions():
 
@@ -270,6 +271,7 @@ def get_all_users_sessions():
     - include_chats: include detailed chat information in sessions (default: false)
     - limit: limit number of users returned (optional)
     - skip: skip number of users for pagination (optional)
+    - search: search by name, email, or mobile number (optional)
     """
     
     try:
@@ -278,6 +280,7 @@ def get_all_users_sessions():
         include_chats = request.args.get('include_chats', 'false').lower() == 'true'
         limit = request.args.get('limit')
         skip = request.args.get('skip', 0)
+        search_query = request.args.get('search', '').strip()
         
         if limit:
             limit = int(limit)
@@ -312,8 +315,21 @@ def get_all_users_sessions():
                 "data": user_session_data
             })
         
-        # Get all users with pagination
-        users_query = db.users.find()
+        # Build search query if search parameter is provided
+        search_filter = {}
+        if search_query:
+            # Create regex pattern for case-insensitive search
+            regex_pattern = {"$regex": search_query, "$options": "i"}
+            search_filter = {
+                "$or": [
+                    {"userName": regex_pattern},
+                    {"mobileNumber": regex_pattern},
+                    {"email": regex_pattern}
+                ]
+            }
+        
+        # Get all users with pagination and search filter
+        users_query = db.users.find(search_filter)
         if skip:
             users_query = users_query.skip(skip)
         if limit:
@@ -346,19 +362,22 @@ def get_all_users_sessions():
         # Sort by total chats descending
         all_users_sessions.sort(key=lambda x: x["totalChats"], reverse=True)
         
-        # Get total count for pagination info
+        # Get total count for pagination info (with search filter applied)
         total_users = db.users.count_documents({})
+        total_filtered_users = db.users.count_documents(search_filter)
         
         return jsonify({
             "success": True,
             "totalUsers": len(all_users_sessions),
             "totalUsersInDB": total_users,
+            "totalFilteredUsers": total_filtered_users,
             "sessionGapMinutes": session_gap,
             "includeChats": include_chats,
+            "searchQuery": search_query if search_query else None,
             "pagination": {
                 "skip": skip,
                 "limit": limit,
-                "hasMore": (skip + len(all_users_sessions)) < total_users if limit else False
+                "hasMore": (skip + len(all_users_sessions)) < total_filtered_users if limit else False
             },
             "data": all_users_sessions
         })
