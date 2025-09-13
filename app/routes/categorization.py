@@ -499,7 +499,7 @@ def generate_all_users_categorization():
         logger.error(f"Error during bulk categorization: {e}")
         return jsonify({"error": str(e)}), 500
 
-
+# Give me Global Statistics
 @user_categorization_bp.route('/global-stats', methods=["GET"])
 def get_global_categorization_stats():
     """Get comprehensive global statistics for all users' categorizations"""
