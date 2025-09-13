@@ -499,10 +499,11 @@ def generate_all_users_categorization():
         logger.error(f"Error during bulk categorization: {e}")
         return jsonify({"error": str(e)}), 500
 
+
 # Give me Global Statistics
 @user_categorization_bp.route('/global-stats', methods=["GET"])
 def get_global_categorization_stats():
-    """Get comprehensive global statistics for all users' categorizations"""
+    """Get comprehensive global statistics for all users' categorizations with unique user counting"""
     try:
         # Optional query parameters
         limit = int(request.args.get('limit', 100))
@@ -517,12 +518,12 @@ def get_global_categorization_stats():
         if not all_users_data:
             return jsonify({"error": "No categorization data found"}), 404
         
-        # Global counters
+        # Global counters - now counting unique users, not sessions
         total_users = len(all_users_data)
         total_sessions = 0
         total_chats = 0
         
-        # Category counters
+        # Category counters - now counting unique users by their majority category
         global_category_counts = {}
         global_subcategory_counts = {}
         
@@ -557,18 +558,27 @@ def get_global_categorization_stats():
                 user_chat_count += chat_count
                 total_chats += chat_count
                 
-                # Count categories globally
-                global_category_counts[primary_category] = global_category_counts.get(primary_category, 0) + 1
+                # Count categories for this user only
                 user_category_counts[primary_category] = user_category_counts.get(primary_category, 0) + 1
                 
-                # Count subcategories globally
+                # Count subcategories for this user only
                 if sub_category and sub_category != "N/A":
-                    global_subcategory_counts[sub_category] = global_subcategory_counts.get(sub_category, 0) + 1
                     user_subcategory_counts[sub_category] = user_subcategory_counts.get(sub_category, 0) + 1
                 
                 # Track emotional distress
                 if primary_category == "Emotional Distress":
                     user_emotional_distress_count += 1
+            
+            # Determine user's majority category (most common category for this user)
+            user_majority_category = max(user_category_counts.items(), key=lambda x: x[1])[0] if user_category_counts else "Other"
+            user_majority_subcategory = max(user_subcategory_counts.items(), key=lambda x: x[1])[0] if user_subcategory_counts else "N/A"
+            
+            # Count this user in global category counts (unique user counting)
+            global_category_counts[user_majority_category] = global_category_counts.get(user_majority_category, 0) + 1
+            
+            # Count this user in global subcategory counts if they have a majority subcategory
+            if user_majority_subcategory != "N/A":
+                global_subcategory_counts[user_majority_subcategory] = global_subcategory_counts.get(user_majority_subcategory, 0) + 1
             
             # Calculate user-level percentages
             user_category_percentages = {}
@@ -591,8 +601,10 @@ def get_global_categorization_stats():
                 "category_percentages": user_category_percentages,
                 "subcategory_percentages": user_subcategory_percentages,
                 "emotional_distress_percentage": user_emotional_distress_percentage,
-                "most_common_category": max(user_category_counts.items(), key=lambda x: x[1])[0] if user_category_counts else None,
-                "most_common_subcategory": max(user_subcategory_counts.items(), key=lambda x: x[1])[0] if user_subcategory_counts else None
+                "majority_category": user_majority_category,
+                "majority_subcategory": user_majority_subcategory,
+                "most_common_category": user_majority_category,  # Keep for backward compatibility
+                "most_common_subcategory": user_majority_subcategory  # Keep for backward compatibility
             }
             
             user_stats.append(user_stat)
@@ -606,14 +618,15 @@ def get_global_categorization_stats():
                     "total_sessions": user_session_count
                 })
         
-        # Calculate global percentages
+        # Calculate global percentages based on unique users
         global_category_percentages = {}
         for category, count in global_category_counts.items():
-            global_category_percentages[category] = round((count / total_sessions) * 100, 2)
+            global_category_percentages[category] = round((count / total_users) * 100, 2)
         
         global_subcategory_percentages = {}
+        total_users_with_subcategories = sum(global_subcategory_counts.values())
         for subcategory, count in global_subcategory_counts.items():
-            global_subcategory_percentages[subcategory] = round((count / total_sessions) * 100, 2)
+            global_subcategory_percentages[subcategory] = round((count / total_users_with_subcategories) * 100, 2) if total_users_with_subcategories > 0 else 0
         
         # Sort users by emotional distress percentage (highest first)
         user_stats.sort(key=lambda x: x.get("emotional_distress_percentage", 0), reverse=True)
@@ -633,7 +646,8 @@ def get_global_categorization_stats():
                 "total_chats": total_chats,
                 "avg_sessions_per_user": avg_sessions_per_user,
                 "avg_chats_per_user": avg_chats_per_user,
-                "avg_emotional_distress_percentage": avg_emotional_distress_percentage
+                "avg_emotional_distress_percentage": avg_emotional_distress_percentage,
+                "note": "Category counts represent unique users by their majority category, not total sessions"
             },
             "global_statistics": {
                 "primary_categories": {

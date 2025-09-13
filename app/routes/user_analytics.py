@@ -20,6 +20,39 @@ def parse_timestamp(timestamp_str):
         except:
             return datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S")
 
+def get_session_categorization(user_id, session_id):
+    """Get categorization data for a specific session from categorization collection"""
+    try:
+        # Find user's categorization data
+        user_categorization = db.categorizations.find_one({"user_id": user_id})
+        
+        if not user_categorization or not user_categorization.get("sessions"):
+            return {
+                "primary_category": "Not Categorized",
+                "sub_category": "N/A"
+            }
+        
+        # Find the specific session in categorization data
+        for session in user_categorization["sessions"]:
+            if session.get("session_id") == session_id:
+                return {
+                    "primary_category": session.get("primary_category", "Not Categorized"),
+                    "sub_category": session.get("sub_category", "N/A")
+                }
+        
+        # If session not found in categorization data
+        return {
+            "primary_category": "Not Categorized", 
+            "sub_category": "N/A"
+        }
+        
+    except Exception as e:
+        # Return default values if any error occurs
+        return {
+            "primary_category": "Not Categorized",
+            "sub_category": "N/A"
+        }
+
 def calculate_user_sessions(user_id, session_gap_minutes=30):
     """Calculate sessions for a specific user based on continuous chat activity"""
     
@@ -91,12 +124,16 @@ def calculate_user_sessions(user_id, session_gap_minutes=30):
                 "sender": chat.get("sender", "")
             })
         
+        # Get categorization data for this session
+        session_categorization = get_session_categorization(user_id, session_idx + 1)
+        
         formatted_session = {
             "sessionId": session_idx + 1,
             "startTime": start_time.isoformat(),
             "endTime": end_time.isoformat(),
             "chatCount": len(session_chats),
-            "durationMinutes": round(session_duration, 2)
+            "durationMinutes": round(session_duration, 2),
+            "categorization": session_categorization
         }
         
         formatted_sessions.append(formatted_session)
@@ -194,6 +231,9 @@ def calculate_user_sessions_with_chats(user_id, session_gap_minutes=30):
         total_characters = sum(len(chat.get("message", "")) for chat in session_chats)
         avg_message_length = total_characters / len(session_chats) if session_chats else 0
         
+        # Get categorization data for this session
+        session_categorization = get_session_categorization(user_id, session_idx + 1)
+        
         formatted_session = {
             "sessionId": session_idx + 1,
             "startTime": start_time.isoformat(),
@@ -202,7 +242,8 @@ def calculate_user_sessions_with_chats(user_id, session_gap_minutes=30):
             "userMessages": user_message_count,
             "botMessages": bot_message_count,
             "durationMinutes": round(session_duration, 2),
-            "chats": formatted_chats  # Include all chat details
+            "chats": formatted_chats,  # Include all chat details
+            "categorization": session_categorization
         }
         
         formatted_sessions.append(formatted_session)
@@ -220,6 +261,7 @@ def calculate_user_sessions_with_chats(user_id, session_gap_minutes=30):
 
 @user_analytics_bp.route('/sessions', methods=['GET'])
 def get_all_users_sessions():
+
     """
     API 1: Get all users with their session analysis
     Query params:
@@ -231,7 +273,7 @@ def get_all_users_sessions():
     """
     
     try:
-        session_gap = int(request.args.get('session_gap', 30))
+        session_gap = int(request.args.get('session_gap', 60))
         specific_user_id = request.args.get('user_id')
         include_chats = request.args.get('include_chats', 'false').lower() == 'true'
         limit = request.args.get('limit')
