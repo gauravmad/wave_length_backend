@@ -4,23 +4,23 @@ from flask import request
 from app.services.db import db
 from datetime import datetime
 from app.services.claude import get_claude_reply
-from app.socket.controller.chat_controller import fetch_chat_history,save_user_message,update_conversation_summary
+from app.socket.controller.chat_controller import fetch_chat_history,save_user_message
+from app.memory.memory_service import MemoryService
 
 def register_chat_events(socketio: SocketIO):
     print("SocketIO initialized:", socketio)
     chats = db.chats
+    memory_service = MemoryService()
 
     # Socket Connected 
     @socketio.on('connect')
     def handle_connect():
         print(f"Client connected: {request.sid}")
 
-
     # Socket Disconnected
     @socketio.on('disconnect')
     def handle_disconnect():
         print(f"Client disconnected: {request.sid}")
-
 
     # Socket to Fetch the chat history 
     @socketio.on("fetch_chat_history")
@@ -56,39 +56,19 @@ def register_chat_events(socketio: SocketIO):
             if not all([user_id, character_id, character_name, message]):
                 raise ValueError("Missing required fields")
 
+            # Save user message to database
             message_data = save_user_message(user_id, character_id, message)
+            
+            # Add user message to Mem0 memory
+            memory_service.add_message_to_memory(user_id, character_id, message, "User")
+            print(f"💾 User message added to Mem0 memory: {message[:50]}...")
+            
             socketio.emit("message_sent", message_data, to=request.sid)
 
         except Exception as e:
             print(f"❌ Error saving user message: {e}")
             socketio.emit("message_error", {
                 "error": "Failed to save user message"
-            }, to=request.sid)
-
-
-    #Update/Create a Global Summary
-    @socketio.on("summarize_message")
-    def handle_summarize_message(data):
-        try:
-            user_id = data.get("userId")
-            character_id = data.get("characterId")
-            new_message = data.get("message")
-            # ✅ Call summary updater
-            
-            if not all([user_id, character_id, new_message]):
-                raise ValueError("Missing required summary fields")
-                
-            summary = update_conversation_summary(user_id, character_id, new_message)
-            socketio.emit("summarize_message", {
-                "userId": user_id,
-                "characterId": character_id,
-                "summary": summary or "No summary generated"
-            }, to=request.sid)
-
-        except Exception as e:
-            print(f"❌ Error summarizing message: {e}")
-            socketio.emit("summary_error", {
-                "error": "Failed to summarize message."
             }, to=request.sid)
 
 
@@ -159,7 +139,7 @@ def register_chat_events(socketio: SocketIO):
                     "Please analyze this image and share your thoughts.",
                     "What do you observe in this image?",
                     "Give your insights based on the image.",
-                    "Describe what’s happening in this picture.",
+                    "Describe what's happening in this picture.",
                     "What can you interpret from this image?"
                 ]
                 prompt = random.choice(fallback_prompts)

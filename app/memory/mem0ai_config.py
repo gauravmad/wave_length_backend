@@ -1,27 +1,31 @@
 # app/services/memory/config.py
-
 from mem0 import Memory
 from app.config import Config
-
 
 class MemoryConfig:
     """Memory Configuration with Gemini API support"""
     
     @staticmethod
     def get_qdrant_config() -> dict:
-        """Get Qdrant Cloud configuration with Gemini LLM"""
+        """Get Qdrant configuration (Cloud or Local) with Gemini LLM"""
         try:
             # Validate configuration first
             Config.validate_qdrant_config()
             
+            # Build config for vector store
+            vector_store_config = {
+                "collection_name": Config.MEM0_COLLECTION_NAME,
+                "url": Config.QDRANT_URL,
+            }
+            
+            # Only add API key if it's provided (for Qdrant Cloud)
+            if Config.QDRANT_API_KEY:
+                vector_store_config["api_key"] = Config.QDRANT_API_KEY
+            
             return {
                 "vector_store": {
                     "provider": "qdrant",
-                    "config": {
-                        "collection_name": Config.MEM0_COLLECTION_NAME,
-                        "url": Config.QDRANT_URL,
-                        "api_key": Config.QDRANT_API_KEY,
-                    }
+                    "config": vector_store_config
                 },
                 "llm": {
                     "provider": "gemini",  # Changed to Gemini provider
@@ -35,7 +39,7 @@ class MemoryConfig:
                     "provider": "gemini",  # Use Gemini embeddings
                     "config": {
                         "model": "models/text-embedding-004",
-                        # "output_dimensionality": 1536,
+                        "output_dimensionality": 768,  # Gemini embedding-004 uses 768 dimensions
                         "api_key": Config.GEMINI_API_KEY
                     }
                 }
@@ -69,7 +73,7 @@ class MemoryConfig:
                     "provider": "gemini",  # Use Gemini embeddings
                     "config": {
                         "model": "models/text-embedding-004",
-                        "output_dimensionality": 1536,  # Match existing Qdrant collection
+                        "output_dimensionality": 768,  # Gemini embedding-004 uses 768 dimensions
                         "api_key": Config.GEMINI_API_KEY  # Explicit API key
                     }
                 }

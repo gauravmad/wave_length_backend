@@ -18,7 +18,8 @@ def save_user_message(user_id:str, character_id:str, message:str, image_url:Opti
     else:
         message_data["message"] = message    
 
-    db.chats.insert_one(message_data)
+    result = db.chats.insert_one(message_data)
+    message_data["_id"] = str(result.inserted_id)  # Convert ObjectId to string
     return message_data
 
 # Save AI Message

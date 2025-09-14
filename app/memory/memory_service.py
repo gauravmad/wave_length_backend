@@ -61,34 +61,105 @@ class MemoryService:
             print(f"❌ Failed to add memory: {e}")
             return False
     
-    def search_relevant_memories(self, user_id: str, character_id: str, query: str, limit: int = 10) -> str:
-        """Search for relevant memories based on the current query"""
+    def search_relevant_memories(self, user_id: str, character_id: str, query: str, limit: int = 15) -> str:
+        """Search for relevant memories based on the current query with improved relevance"""
         try:
             user_identifier = self.get_user_identifier(user_id, character_id)
             
-            # Search for relevant memories
+            # Enhanced query for better relevance - include context keywords
+            enhanced_query = f"{query} conversation context user preferences"
+            
+            # Search for relevant memories with enhanced query
             relevant_memories = self.memory.search(
-                query=query,
+                query=enhanced_query,
                 user_id=user_identifier,
                 limit=limit
             )
             
+            # print(f"🔍 Raw search results type: {type(relevant_memories)}")
+            # print(f"🔍 Raw search results: {relevant_memories}")
+            
             if not relevant_memories:
+                print(f"🔍 No relevant memories found for query: {query[:50]}...")
                 return "No relevant memories found."
             
-            # Format memories for context
-            memory_context = "## Relevant Memories:\n"
-            for i, mem in enumerate(relevant_memories, 1):
-                memory_text = mem.get('memory', '')
-                score = mem.get('score', 0)
-                metadata = mem.get('metadata', {})
+            # Handle different return formats from Mem0
+            # Check if it's a dictionary with 'results' key (new format)
+            if isinstance(relevant_memories, dict) and 'results' in relevant_memories:
+                results_list = relevant_memories['results']
+                if not results_list:
+                    print(f"🔍 No results in search response for query: {query[:50]}...")
+                    return "No relevant memories found."
                 
-                # Add timestamp if available
-                timestamp = metadata.get('timestamp', 'Unknown time')
-                memory_context += f"{i}. {memory_text} (Relevance: {score:.2f}, Time: {timestamp})\n"
+                # Filter memories by relevance score (only include memories with score > 0.3)
+                filtered_memories = [mem for mem in results_list if mem.get('score', 0) > 0.3]
+                
+                if not filtered_memories:
+                    print(f"🔍 No high-relevance memories found (score > 0.3) for query: {query[:50]}...")
+                    return "No relevant memories found."
+                
+                # Format memories for context - prioritize by relevance score
+                memory_context = "## Relevant Memories:\n"
+                for i, mem in enumerate(filtered_memories[:10], 1):  # Limit to top 10 most relevant
+                    memory_text = mem.get('memory', '')
+                    
+                    # Clean up memory text
+                    if memory_text.startswith(('User:', 'AI:')):
+                        memory_text = memory_text.split(':', 1)[1].strip()
+                    
+                    memory_context += f"{i}. {memory_text}\n"
+                
+                print(f"🔍 Found {len(filtered_memories)} relevant memories (score > 0.3) for query: {query[:50]}...")
+                return memory_context
             
-            print(f"🔍 Found {len(relevant_memories)} relevant memories")
-            return memory_context
+            # Handle list format (legacy)
+            elif isinstance(relevant_memories, list):
+                # If it's a list of strings, use them directly
+                if relevant_memories and isinstance(relevant_memories[0], str):
+                    memory_context = "## Relevant Memories:\n"
+                    for i, memory_text in enumerate(relevant_memories[:10], 1):
+                        # Clean up memory text
+                        if memory_text.startswith(('User:', 'AI:')):
+                            memory_text = memory_text.split(':', 1)[1].strip()
+                        memory_context += f"{i}. {memory_text}\n"
+                    
+                    print(f"🔍 Found {len(relevant_memories)} relevant memories for query: {query[:50]}...")
+                    return memory_context
+                
+                # If it's a list of dictionaries, process them
+                elif relevant_memories and isinstance(relevant_memories[0], dict):
+                    # Filter memories by relevance score (only include memories with score > 0.3)
+                    filtered_memories = [mem for mem in relevant_memories if mem.get('score', 0) > 0.3]
+                    
+                    if not filtered_memories:
+                        print(f"🔍 No high-relevance memories found (score > 0.3) for query: {query[:50]}...")
+                        return "No relevant memories found."
+                    
+                    # Format memories for context - prioritize by relevance score
+                    memory_context = "## Relevant Memories:\n"
+                    for i, mem in enumerate(filtered_memories[:10], 1):  # Limit to top 10 most relevant
+                        memory_text = mem.get('memory', '')
+                        
+                        # Clean up memory text
+                        if memory_text.startswith(('User:', 'AI:')):
+                            memory_text = memory_text.split(':', 1)[1].strip()
+                        
+                        memory_context += f"{i}. {memory_text}\n"
+                    
+                    print(f"🔍 Found {len(filtered_memories)} relevant memories (score > 0.3) for query: {query[:50]}...")
+                    return memory_context
+            
+            # If it's a single string, return it
+            elif isinstance(relevant_memories, str):
+                memory_context = "## Relevant Memories:\n"
+                if relevant_memories.startswith(('User:', 'AI:')):
+                    relevant_memories = relevant_memories.split(':', 1)[1].strip()
+                memory_context += f"1. {relevant_memories}\n"
+                print(f"🔍 Found 1 relevant memory for query: {query[:50]}...")
+                return memory_context
+            
+            print(f"🔍 Unexpected memory format: {type(relevant_memories)}")
+            return "No relevant memories found."
             
         except Exception as e:
             print(f"❌ Failed to search memories: {e}")
@@ -102,8 +173,9 @@ class MemoryService:
             # Update memories with the conversation context
             conversation_context = f"User: {user_message}\nAI: {ai_response}"
             
+            # Use the correct method call for Mem0 update
             self.memory.update(
-                messages=conversation_context,
+                message=conversation_context,
                 user_id=user_identifier
             )
             

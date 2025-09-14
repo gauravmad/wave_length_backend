@@ -12,6 +12,7 @@ from app.routes.user_analytics import user_analytics_bp
 from app.routes.categorization import user_categorization_bp
 from app.routes.report import report_bp
 from app.routes.chat import chat_bp
+from app.routes.memo_routes import memo_bp
 from app.socket.chat_socket import register_chat_events
 
 # Initialize SocketIO without app first
@@ -51,6 +52,7 @@ def create_app():
     app.register_blueprint(verify_otp_bp, url_prefix="/api/verify-otp")
     # app.register_blueprint(character_bp,url_prefix="/api/character")
     app.register_blueprint(chat_bp, url_prefix="/api/chat")
+    app.register_blueprint(memo_bp, url_prefix="/api/memo")
     app.register_blueprint(upload_image_bp, url_prefix="/api/upload-image")
     app.register_blueprint(user_analytics_bp, url_prefix="/api/user-analytics")
     app.register_blueprint(user_categorization_bp, url_prefix="/api/user-categorization")

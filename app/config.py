@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
 class Config:
     """Application configuration with Qdrant support"""
     
@@ -41,8 +40,9 @@ class Config:
         if not cls.QDRANT_URL:
             missing_configs.append('QUADRANT_API_URL')
         
-        if not cls.QDRANT_API_KEY:
-            missing_configs.append('QUADRANT_API_KEY')
+        # API key is optional for local Qdrant instances
+        if not cls.QDRANT_API_KEY and not cls.QDRANT_URL.startswith('http://localhost') and not cls.QDRANT_URL.startswith('http://127.0.0.1') and not '15.207.106.82' in cls.QDRANT_URL:
+            print("⚠️  Warning: No API key provided. This is fine for local Qdrant instances.")
         
         if not cls.ANTHROPIC_API_KEY:  # Changed to use Anthropic instead of Gemini
             missing_configs.append('ANTHROPIC_API_KEY')
@@ -58,6 +58,10 @@ class Config:
             raise ValueError("QUADRANT_API_URL must start with http:// or https://")
         
         print(f"✅ Qdrant configuration validated: {cls.QDRANT_URL}")
+        if cls.QDRANT_API_KEY:
+            print(f"✅ Qdrant API key validated")
+        else:
+            print(f"✅ Local Qdrant instance (no API key required)")
         print(f"✅ Anthropic API key validated")
     
     @classmethod

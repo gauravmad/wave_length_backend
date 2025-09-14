@@ -36,3 +36,11 @@ class PromptService:
         system_prompt = system_prompt.replace("{{conversationSummary}}", memory_context)
         system_prompt = system_prompt.replace("{{recentMessages}}", chats_context)
         return system_prompt
+    
+    @staticmethod
+    def inject_all_context_into_prompt(system_prompt: str, memory_context: str, chats_context: str, timestamp_info: str) -> str:
+        """Inject all context variables into system prompt"""
+        system_prompt = system_prompt.replace("{{conversationSummary}}", memory_context)
+        system_prompt = system_prompt.replace("{{recentMessages}}", chats_context)
+        system_prompt = system_prompt.replace("{{timestampInfo}}", timestamp_info)
+        return system_prompt

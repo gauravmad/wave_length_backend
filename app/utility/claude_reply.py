@@ -31,7 +31,7 @@ def fetch_recent_chats(user_id: str, character_id: str, limit: int = 20) -> str:
         ).sort("timestamp", -1).limit(limit)
 
         chat_docs = list(chat_cursor)
-        print(f"Chats Docs: {chat_docs}")
+        # print(f"Chats Docs: {chat_docs}")
         
         # Handle case where no chats exist
         if not chat_docs:
