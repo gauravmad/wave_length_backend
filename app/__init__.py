@@ -67,6 +67,11 @@ def create_app():
     def index():
         return send_from_directory(app.static_folder, "index.html")
 
+    # Serve webhook test page
+    @app.route("/webhook_test.html")
+    def webhook_test():
+        return send_from_directory(app.static_folder, "webhook_test.html")
+
     @app.route("/health")
     def health():
         return {"status": "healthy", "socketio": "enabled"} 

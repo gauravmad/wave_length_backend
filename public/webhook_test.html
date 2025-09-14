@@ -131,6 +131,27 @@
             </div>
 
             <div class="flex flex-col sm:flex-row gap-4 justify-center">
+                <button id="testRoutesBtn" onclick="testRoutes()" 
+                        class="px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-bold rounded-xl transition-all duration-300 transform hover:scale-105 hover:shadow-lg hover:shadow-blue-500/25 flex items-center justify-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Test Routes
+                </button>
+                <button id="testWebhookBtn" onclick="testWebhook()" 
+                        class="px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white font-bold rounded-xl transition-all duration-300 transform hover:scale-105 hover:shadow-lg hover:shadow-purple-500/25 flex items-center justify-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                    Test Webhook
+                </button>
+                <button id="testSimpleBtn" onclick="testSimpleWebhook()" 
+                        class="px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-600 hover:from-yellow-600 hover:to-orange-700 text-white font-bold rounded-xl transition-all duration-300 transform hover:scale-105 hover:shadow-lg hover:shadow-yellow-500/25 flex items-center justify-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"></path>
+                    </svg>
+                    Test Simple
+                </button>
                 <button id="startBtn" onclick="startProcessing()" 
                         class="px-8 py-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold rounded-xl transition-all duration-300 transform hover:scale-105 hover:shadow-lg hover:shadow-green-500/25 flex items-center justify-center">
                     <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -155,6 +176,17 @@
                 <div class="w-4 h-4 bg-gray-400 rounded-full mr-4 animate-pulse"></div>
                 <span class="text-white text-lg font-medium">Ready to start processing...</span>
             </div>
+        </div>
+
+        <!-- Test Results Panel -->
+        <div id="testResults" class="glass rounded-3xl p-6 mb-8 max-w-6xl mx-auto" style="display: none;">
+            <h3 class="text-xl font-bold text-white mb-4 flex items-center">
+                <svg class="w-6 h-6 mr-3 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                Test Results
+            </h3>
+            <div id="testResultsContent" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
         </div>
 
         <!-- Log Container -->
@@ -198,6 +230,120 @@
         let eventSource = null;
         let isProcessing = false;
         
+        // Test functions
+        async function testRoutes() {
+            try {
+                addLogEntry('test', 'Testing basic routes...');
+                const response = await fetch('/api/memo/test');
+                const data = await response.json();
+                
+                if (data.success) {
+                    addLogEntry('success', `✅ Routes working: ${data.message}`, {}, data.timestamp);
+                    updateTestResult('routes', true, data.message);
+                } else {
+                    addLogEntry('error', `❌ Routes failed: ${data.error || 'Unknown error'}`);
+                    updateTestResult('routes', false, data.error || 'Unknown error');
+                }
+            } catch (error) {
+                addLogEntry('error', `❌ Routes test failed: ${error.message}`);
+                updateTestResult('routes', false, error.message);
+            }
+        }
+        
+        async function testWebhook() {
+            try {
+                addLogEntry('test', 'Testing webhook routes and database...');
+                const response = await fetch('/api/memo/webhook/test');
+                const data = await response.json();
+                
+                if (data.success) {
+                    addLogEntry('success', `✅ Webhook working: ${data.message}`, {
+                        users: data.stats.users,
+                        characters: data.stats.characters,
+                        chats: data.stats.chats
+                    }, data.timestamp);
+                    updateTestResult('webhook', true, `${data.message} - Users: ${data.stats.users}, Chats: ${data.stats.chats}`);
+                } else {
+                    addLogEntry('error', `❌ Webhook failed: ${data.error || 'Unknown error'}`);
+                    updateTestResult('webhook', false, data.error || 'Unknown error');
+                }
+            } catch (error) {
+                addLogEntry('error', `❌ Webhook test failed: ${error.message}`);
+                updateTestResult('webhook', false, error.message);
+            }
+        }
+        
+        async function testSimpleWebhook() {
+            try {
+                const batchSize = document.getElementById('batchSize').value;
+                const subBatchSize = document.getElementById('subBatchSize').value;
+                const maxUsers = document.getElementById('maxUsers').value;
+                const startFromUser = document.getElementById('startFromUser').value;
+                
+                addLogEntry('test', 'Testing simple webhook with current config...');
+                
+                const response = await fetch('/api/memo/webhook/process-all-users-simple', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        batchSize: parseInt(batchSize),
+                        subBatchSize: parseInt(subBatchSize),
+                        maxUsers: parseInt(maxUsers),
+                        startFromUser: parseInt(startFromUser)
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    addLogEntry('success', `✅ Simple webhook working: ${data.message}`, {
+                        total_users: data.stats.total_users_in_db,
+                        users_to_process: data.stats.users_to_process,
+                        skipped_users: data.stats.skipped_users
+                    }, data.timestamp);
+                    updateTestResult('simple', true, `${data.message} - Processing ${data.stats.users_to_process} users`);
+                } else {
+                    addLogEntry('error', `❌ Simple webhook failed: ${data.error || 'Unknown error'}`);
+                    updateTestResult('simple', false, data.error || 'Unknown error');
+                }
+            } catch (error) {
+                addLogEntry('error', `❌ Simple webhook test failed: ${error.message}`);
+                updateTestResult('simple', false, error.message);
+            }
+        }
+        
+        function updateTestResult(testType, success, message) {
+            const testResultsDiv = document.getElementById('testResults');
+            const testResultsContent = document.getElementById('testResultsContent');
+            
+            // Show test results panel
+            testResultsDiv.style.display = 'block';
+            
+            // Create or update test result card
+            let existingCard = document.getElementById(`test-${testType}`);
+            if (!existingCard) {
+                existingCard = document.createElement('div');
+                existingCard.id = `test-${testType}`;
+                existingCard.className = 'glass rounded-2xl p-4';
+                testResultsContent.appendChild(existingCard);
+            }
+            
+            const statusColor = success ? 'from-green-500 to-emerald-600' : 'from-red-500 to-pink-600';
+            const statusIcon = success ? '✅' : '❌';
+            const statusText = success ? 'Success' : 'Failed';
+            
+            existingCard.innerHTML = `
+                <div class="text-center">
+                    <div class="text-2xl mb-2">${statusIcon}</div>
+                    <div class="text-lg font-bold bg-gradient-to-r ${statusColor} bg-clip-text text-transparent mb-2">${statusText}</div>
+                    <div class="text-sm text-gray-300 capitalize mb-2">${testType} Test</div>
+                    <div class="text-xs text-gray-400">${message}</div>
+                </div>
+            `;
+        }
+        
         function startProcessing() {
             if (isProcessing) return;
             
@@ -222,16 +368,10 @@
                 </div>
             `;
             
-            // Create EventSource for Server-Sent Events
+            // Start the webhook processing with POST request
             const url = '/api/memo/webhook/process-all-users';
-            eventSource = new EventSource(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
             
-            // Send POST data
+            // Send POST request to start the webhook processing
             fetch(url, {
                 method: 'POST',
                 headers: {
@@ -243,29 +383,74 @@
                     maxUsers: parseInt(maxUsers),
                     startFromUser: parseInt(startFromUser)
                 })
+            }).then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                // Create EventSource to listen for Server-Sent Events
+                // Note: EventSource doesn't support POST, so we need to use a different approach
+                // We'll use fetch with streaming response
+                currentReader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                function readStream() {
+                    if (!currentReader) {
+                        console.log('Stream reader is null, stopping');
+                        return;
+                    }
+                    
+                    currentReader.read().then(({ done, value }) => {
+                        if (done) {
+                            addLogEntry('complete', 'Processing completed');
+                            stopProcessing();
+                            return;
+                        }
+                        
+                        const chunk = decoder.decode(value);
+                        const lines = chunk.split('\n');
+                        
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    const data = JSON.parse(line.substring(6));
+                                    handleProgressUpdate(data);
+                                } catch (err) {
+                                    console.error('Error parsing SSE data:', err);
+                                }
+                            }
+                        }
+                        
+                        // Only continue reading if reader still exists
+                        if (currentReader) {
+                            readStream();
+                        }
+                    }).catch(err => {
+                        console.error('Error reading stream:', err);
+                        addLogEntry('error', 'Stream reading error: ' + err.message);
+                        stopProcessing();
+                    });
+                }
+                
+                readStream();
+                
             }).catch(err => {
                 console.error('Error starting processing:', err);
                 addLogEntry('error', 'Failed to start processing: ' + err.message);
-            });
-            
-            // Listen for messages
-            eventSource.onmessage = function(event) {
-                try {
-                    const data = JSON.parse(event.data);
-                    handleProgressUpdate(data);
-                } catch (err) {
-                    console.error('Error parsing event data:', err);
-                }
-            };
-            
-            eventSource.onerror = function(event) {
-                console.error('EventSource error:', event);
-                addLogEntry('error', 'Connection error occurred');
                 stopProcessing();
-            };
+            });
         }
         
+        let currentReader = null;
+        
         function stopProcessing() {
+            // Close any active stream reader
+            if (currentReader) {
+                currentReader.cancel();
+                currentReader = null;
+            }
+            
+            // Close EventSource if it exists (for backward compatibility)
             if (eventSource) {
                 eventSource.close();
                 eventSource = null;
@@ -387,6 +572,11 @@
                     borderColor = 'border-red-600/50';
                     dotColor = 'bg-red-400';
                     break;
+                case 'api_call':
+                    bgColor = 'bg-teal-900/30';
+                    borderColor = 'border-teal-600/50';
+                    dotColor = 'bg-teal-400';
+                    break;
                 case 'batch_progress':
                     bgColor = 'bg-cyan-900/30';
                     borderColor = 'border-cyan-600/50';
@@ -406,6 +596,16 @@
                     bgColor = 'bg-emerald-900/30';
                     borderColor = 'border-emerald-600/50';
                     dotColor = 'bg-emerald-400';
+                    break;
+                case 'test':
+                    bgColor = 'bg-gray-800/30';
+                    borderColor = 'border-gray-600/50';
+                    dotColor = 'bg-gray-400';
+                    break;
+                case 'success':
+                    bgColor = 'bg-green-900/30';
+                    borderColor = 'border-green-600/50';
+                    dotColor = 'bg-green-400';
                     break;
                 case 'error':
                     bgColor = 'bg-red-900/30';
@@ -456,6 +656,9 @@
         
         // Clean up on page unload
         window.addEventListener('beforeunload', function() {
+            if (currentReader) {
+                currentReader.cancel();
+            }
             if (eventSource) {
                 eventSource.close();
             }
