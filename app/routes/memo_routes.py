@@ -2,11 +2,13 @@
 import traceback
 from datetime import datetime
 from app.services.db import db
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
 from bson import ObjectId
 from app.memory.memory_service import MemoryService
 from app.utility.performance_logger import PerformanceLogger
 from app.models.users import get_user_by_id
+import json
+import time
 
 memo_bp = Blueprint("memo", __name__)
 
@@ -636,3 +638,197 @@ def _process_chat_batch(memory_service: MemoryService, user_id: str, character_i
         "processed": processed,
         "failed": failed
     }
+
+
+@memo_bp.route("/webhook/process-all-users", methods=["POST"])
+def webhook_process_all_users():
+    """
+    Webhook endpoint to process ALL users in batches with real-time progress updates
+    
+    This endpoint will:
+    1. Fetch all users from the database
+    2. For each user, get all their characters
+    3. Process all chats for each user-character pair in batches
+    4. Send real-time progress updates via Server-Sent Events (SSE)
+    
+    Expected JSON payload:
+    {
+        "batchSize": 50,      // optional, default 50 (chats per batch)
+        "subBatchSize": 10,   // optional, default 10 (for processing sub-batches)
+        "maxUsers": 100,      // optional, default 100 (limit number of users to process)
+        "startFromUser": 4    // optional, default 1 (start processing from this user index)
+    }
+    """
+    
+    def generate_progress_updates():
+        """Generator function for Server-Sent Events"""
+        try:
+            # Get request data
+            data = request.get_json() or {}
+            batch_size = data.get("batchSize", 50)
+            sub_batch_size = data.get("subBatchSize", 10)
+            max_users = data.get("maxUsers", 100)
+            start_from_user = data.get("startFromUser", 1)
+            
+            # Send initial status
+            if start_from_user > 1:
+                yield f"data: {json.dumps({'type': 'start', 'message': f'Starting batch processing from user {start_from_user}...', 'start_from_user': start_from_user, 'timestamp': datetime.now().isoformat()})}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'start', 'message': 'Starting batch processing for all users...', 'timestamp': datetime.now().isoformat()})}\n\n"
+            
+            # Initialize memory service
+            memory_service = MemoryService()
+            
+            # Fetch all users
+            yield f"data: {json.dumps({'type': 'fetch_users', 'message': 'Fetching all users from database...', 'timestamp': datetime.now().isoformat()})}\n\n"
+            
+            # Fetch all users and apply start_from_user offset
+            users_cursor = db.users.find({}).limit(max_users + start_from_user - 1)
+            all_users = list(users_cursor)
+            
+            # Skip users before start_from_user
+            if start_from_user > 1:
+                users = all_users[start_from_user - 1:]
+                skipped_users = start_from_user - 1
+            else:
+                users = all_users
+                skipped_users = 0
+            
+            total_users = len(users)
+            total_all_users = len(all_users)
+            
+            if skipped_users > 0:
+                yield f"data: {json.dumps({'type': 'users_fetched', 'message': f'Fetched {total_users} users (skipped first {skipped_users} users)', 'total_users': total_users, 'skipped_users': skipped_users, 'start_from_user': start_from_user, 'timestamp': datetime.now().isoformat()})}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'users_fetched', 'message': f'Fetched {total_users} users', 'total_users': total_users, 'timestamp': datetime.now().isoformat()})}\n\n"
+            
+            if total_users == 0:
+                yield f"data: {json.dumps({'type': 'complete', 'message': 'No users found in database', 'timestamp': datetime.now().isoformat()})}\n\n"
+                return
+            
+            # Process each user
+            total_processed_users = 0
+            total_processed_chats = 0
+            total_failed_chats = 0
+            total_memories_created = 0
+            
+            for user_index, user in enumerate(users, start_from_user):
+                user_id = str(user.get("_id"))
+                user_name = user.get("userName", "Unknown User")
+                
+                # Send user start status
+                yield f"data: {json.dumps({'type': 'user_start', 'message': f'Processing user {user_index}/{total_all_users}: {user_name}', 'user_id': user_id, 'user_name': user_name, 'user_index': user_index, 'total_users': total_users, 'total_all_users': total_all_users, 'timestamp': datetime.now().isoformat()})}\n\n"
+                
+                # Get all characters for this user
+                characters_cursor = db.characters.find({"userId": user_id})
+                characters = list(characters_cursor)
+                
+                if not characters:
+                    yield f"data: {json.dumps({'type': 'user_skip', 'message': f'No characters found for user {user_name}', 'user_id': user_id, 'user_name': user_name, 'timestamp': datetime.now().isoformat()})}\n\n"
+                    continue
+                
+                yield f"data: {json.dumps({'type': 'user_characters', 'message': f'Found {len(characters)} characters for user {user_name}', 'user_id': user_id, 'user_name': user_name, 'characters_count': len(characters), 'timestamp': datetime.now().isoformat()})}\n\n"
+                
+                # Process each character for this user
+                user_processed_chats = 0
+                user_failed_chats = 0
+                
+                for char_index, character in enumerate(characters, 1):
+                    character_id = str(character.get("_id"))
+                    character_name = character.get("name", "Unknown Character")
+                    
+                    yield f"data: {json.dumps({'type': 'character_start', 'message': f'Processing character {char_index}/{len(characters)}: {character_name}', 'user_id': user_id, 'user_name': user_name, 'character_id': character_id, 'character_name': character_name, 'char_index': char_index, 'total_characters': len(characters), 'timestamp': datetime.now().isoformat()})}\n\n"
+                    
+                    # Get total chats for this user-character pair
+                    query = {
+                        "userId": user_id,
+                        "characterId": character_id
+                    }
+                    
+                    total_chats = db.chats.count_documents(query)
+                    
+                    if total_chats == 0:
+                        yield f"data: {json.dumps({'type': 'character_skip', 'message': f'No chats found for character {character_name}', 'user_id': user_id, 'user_name': user_name, 'character_id': character_id, 'character_name': character_name, 'total_chats': 0, 'timestamp': datetime.now().isoformat()})}\n\n"
+                        continue
+                    
+                    yield f"data: {json.dumps({'type': 'character_chats', 'message': f'Found {total_chats} chats for character {character_name}', 'user_id': user_id, 'user_name': user_name, 'character_id': character_id, 'character_name': character_name, 'total_chats': total_chats, 'timestamp': datetime.now().isoformat()})}\n\n"
+                    
+                    # Calculate number of batches needed
+                    total_batches = (total_chats + batch_size - 1) // batch_size
+                    
+                    # Process all batches for this character
+                    character_processed = 0
+                    character_failed = 0
+                    
+                    for batch_num in range(1, total_batches + 1):
+                        start_index = (batch_num - 1) * batch_size + 1
+                        end_index = min(batch_num * batch_size, total_chats)
+                        
+                        # Calculate actual range to fetch
+                        actual_start = start_index - 1
+                        actual_count = end_index - actual_start
+                        
+                        # Fetch chats in this batch
+                        chats_cursor = db.chats.find(query).sort("timestamp", 1).skip(actual_start).limit(actual_count)
+                        chats = list(chats_cursor)
+                        
+                        if not chats:
+                            continue
+                        
+                        # Process chats in sub-batches
+                        batch_processed = 0
+                        batch_failed = 0
+                        
+                        for i in range(0, len(chats), sub_batch_size):
+                            sub_batch = chats[i:i + sub_batch_size]
+                            sub_batch_results = _process_chat_batch(memory_service, user_id, character_id, sub_batch)
+                            batch_processed += sub_batch_results["processed"]
+                            batch_failed += sub_batch_results["failed"]
+                        
+                        character_processed += batch_processed
+                        character_failed += batch_failed
+                        
+                        # Send batch progress
+                        yield f"data: {json.dumps({'type': 'batch_progress', 'message': f'Processed batch {batch_num}/{total_batches} for {character_name}', 'user_id': user_id, 'user_name': user_name, 'character_id': character_id, 'character_name': character_name, 'batch_num': batch_num, 'total_batches': total_batches, 'batch_processed': batch_processed, 'batch_failed': batch_failed, 'timestamp': datetime.now().isoformat()})}\n\n"
+                        
+                        # Small delay to prevent overwhelming the system
+                        time.sleep(0.1)
+                    
+                    # Get final memory stats for this character
+                    final_stats = memory_service.get_memory_stats(user_id, character_id)
+                    character_memories = final_stats.get("total_memories", 0)
+                    
+                    user_processed_chats += character_processed
+                    user_failed_chats += character_failed
+                    total_memories_created += character_memories
+                    
+                    # Send character completion status
+                    yield f"data: {json.dumps({'type': 'character_complete', 'message': f'Completed character {character_name}: {character_processed} processed, {character_failed} failed, {character_memories} memories', 'user_id': user_id, 'user_name': user_name, 'character_id': character_id, 'character_name': character_name, 'processed': character_processed, 'failed': character_failed, 'memories': character_memories, 'timestamp': datetime.now().isoformat()})}\n\n"
+                
+                total_processed_chats += user_processed_chats
+                total_failed_chats += user_failed_chats
+                total_processed_users += 1
+                
+                # Send user completion status
+                yield f"data: {json.dumps({'type': 'user_complete', 'message': f'Completed user {user_name}: {user_processed_chats} chats processed, {user_failed_chats} failed', 'user_id': user_id, 'user_name': user_name, 'processed': user_processed_chats, 'failed': user_failed_chats, 'user_index': user_index, 'total_users': total_users, 'total_all_users': total_all_users, 'timestamp': datetime.now().isoformat()})}\n\n"
+            
+            # Send final completion status
+            yield f"data: {json.dumps({'type': 'complete', 'message': f'All users processed successfully!', 'summary': {'total_users': total_users, 'processed_users': total_processed_users, 'total_chats_processed': total_processed_chats, 'total_chats_failed': total_failed_chats, 'total_memories_created': total_memories_created, 'start_from_user': start_from_user, 'skipped_users': skipped_users}, 'timestamp': datetime.now().isoformat()})}\n\n"
+            
+        except Exception as e:
+            error_msg = f"Error in webhook processing: {str(e)}"
+            print(f"❌ {error_msg}")
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'timestamp': datetime.now().isoformat()})}\n\n"
+    
+    # Return Server-Sent Events response
+    return Response(
+        generate_progress_updates(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Cache-Control'
+        }
+    )

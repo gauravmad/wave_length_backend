@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memory Processing Webhook - Modern UI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'bounce-slow': 'bounce 2s infinite',
+                        'spin-slow': 'spin 3s linear infinite',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .glass {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .glass-dark {
+            background: rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .gradient-bg-dark {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        }
+        .log-entry {
+            transition: all 0.3s ease;
+        }
+        .log-entry:hover {
+            transform: translateX(5px);
+        }
+        .status-indicator {
+            position: relative;
+            overflow: hidden;
+        }
+        .status-indicator::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+        .status-indicator.running::before {
+            left: 100%;
+            animation: shimmer 2s infinite;
+        }
+        @keyframes shimmer {
+            0% { left: -100%; }
+            100% { left: 100%; }
+        }
+        .floating {
+            animation: float 6s ease-in-out infinite;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+        }
+    </style>
+</head>
+<body class="gradient-bg-dark min-h-screen">
+    <!-- Background Elements -->
+    <div class="fixed inset-0 overflow-hidden pointer-events-none">
+        <div class="absolute -top-40 -right-40 w-80 h-80 bg-purple-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 floating"></div>
+        <div class="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 floating" style="animation-delay: 2s;"></div>
+        <div class="absolute top-40 left-1/2 w-80 h-80 bg-pink-500 rounded-full mix-blend-multiply filter blur-xl opacity-20 floating" style="animation-delay: 4s;"></div>
+    </div>
+
+    <div class="relative z-10 container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="text-center mb-12">
+            <div class="glass rounded-3xl p-8 max-w-4xl mx-auto">
+                <div class="flex items-center justify-center mb-6">
+                    <div class="w-16 h-16 bg-gradient-to-r from-blue-400 to-purple-500 rounded-2xl flex items-center justify-center mr-4">
+                        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                    </div>
+                    <h1 class="text-4xl font-bold bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent">
+                        Memory Processing Webhook
+                    </h1>
+                </div>
+                <p class="text-gray-300 text-lg">Real-time batch processing with beautiful progress tracking</p>
+            </div>
+        </div>
+
+        <!-- Controls Panel -->
+        <div class="glass rounded-3xl p-8 mb-8 max-w-6xl mx-auto">
+            <h2 class="text-2xl font-bold text-white mb-6 flex items-center">
+                <svg class="w-6 h-6 mr-3 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4"></path>
+                </svg>
+                Configuration
+            </h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <div class="space-y-2">
+                    <label class="block text-sm font-medium text-gray-300">Batch Size</label>
+                    <input type="number" id="batchSize" value="50" min="1" max="200" 
+                           class="w-full px-4 py-3 bg-gray-800/50 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+                </div>
+                <div class="space-y-2">
+                    <label class="block text-sm font-medium text-gray-300">Sub-Batch Size</label>
+                    <input type="number" id="subBatchSize" value="10" min="1" max="50" 
+                           class="w-full px-4 py-3 bg-gray-800/50 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+                </div>
+                <div class="space-y-2">
+                    <label class="block text-sm font-medium text-gray-300">Max Users</label>
+                    <input type="number" id="maxUsers" value="100" min="1" max="1000" 
+                           class="w-full px-4 py-3 bg-gray-800/50 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+                </div>
+                <div class="space-y-2">
+                    <label class="block text-sm font-medium text-gray-300">Start From User</label>
+                    <input type="number" id="startFromUser" value="1" min="1" max="1000" 
+                           class="w-full px-4 py-3 bg-gray-800/50 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row gap-4 justify-center">
+                <button id="startBtn" onclick="startProcessing()" 
+                        class="px-8 py-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold rounded-xl transition-all duration-300 transform hover:scale-105 hover:shadow-lg hover:shadow-green-500/25 flex items-center justify-center">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h1m4 0h1m6-6V7a3 3 0 00-3-3H6a3 3 0 00-3 3v1.5"></path>
+                    </svg>
+                    Start Processing
+                </button>
+                <button id="stopBtn" onclick="stopProcessing()" disabled
+                        class="px-8 py-4 bg-gradient-to-r from-red-500 to-pink-600 hover:from-red-600 hover:to-pink-700 text-white font-bold rounded-xl transition-all duration-300 transform hover:scale-105 hover:shadow-lg hover:shadow-red-500/25 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10h6v4H9z"></path>
+                    </svg>
+                    Stop
+                </button>
+            </div>
+        </div>
+
+        <!-- Status Panel -->
+        <div id="status" class="glass rounded-3xl p-6 mb-8 max-w-6xl mx-auto status-indicator">
+            <div class="flex items-center">
+                <div class="w-4 h-4 bg-gray-400 rounded-full mr-4 animate-pulse"></div>
+                <span class="text-white text-lg font-medium">Ready to start processing...</span>
+            </div>
+        </div>
+
+        <!-- Log Container -->
+        <div class="glass-dark rounded-3xl p-6 max-w-6xl mx-auto">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-xl font-bold text-white flex items-center">
+                    <svg class="w-6 h-6 mr-3 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    Processing Logs
+                </h3>
+                <div class="flex items-center space-x-2">
+                    <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                    <span class="text-sm text-gray-400">Live</span>
+                </div>
+            </div>
+            
+            <div id="logContainer" class="h-96 overflow-y-auto space-y-2 pr-2 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
+                <div class="log-entry p-4 bg-gray-800/30 rounded-xl border border-gray-700/50">
+                    <div class="flex items-center">
+                        <div class="w-2 h-2 bg-gray-400 rounded-full mr-3"></div>
+                        <span class="text-gray-400 text-sm">Waiting for processing to start...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary Panel -->
+        <div id="summary" class="glass rounded-3xl p-8 mt-8 max-w-6xl mx-auto" style="display: none;">
+            <h3 class="text-2xl font-bold text-white mb-6 flex items-center">
+                <svg class="w-6 h-6 mr-3 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                </svg>
+                Processing Summary
+            </h3>
+            <div id="summaryContent" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let isProcessing = false;
+        
+        function startProcessing() {
+            if (isProcessing) return;
+            
+            const batchSize = document.getElementById('batchSize').value;
+            const subBatchSize = document.getElementById('subBatchSize').value;
+            const maxUsers = document.getElementById('maxUsers').value;
+            const startFromUser = document.getElementById('startFromUser').value;
+            
+            // Clear previous logs
+            document.getElementById('logContainer').innerHTML = '';
+            document.getElementById('summary').style.display = 'none';
+            
+            // Update UI
+            isProcessing = true;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            document.getElementById('status').className = 'glass rounded-3xl p-6 mb-8 max-w-6xl mx-auto status-indicator running';
+            document.getElementById('status').innerHTML = `
+                <div class="flex items-center">
+                    <div class="w-4 h-4 bg-green-400 rounded-full mr-4 animate-pulse"></div>
+                    <span class="text-white text-lg font-medium">Processing started...</span>
+                </div>
+            `;
+            
+            // Create EventSource for Server-Sent Events
+            const url = '/api/memo/webhook/process-all-users';
+            eventSource = new EventSource(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            // Send POST data
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    batchSize: parseInt(batchSize),
+                    subBatchSize: parseInt(subBatchSize),
+                    maxUsers: parseInt(maxUsers),
+                    startFromUser: parseInt(startFromUser)
+                })
+            }).catch(err => {
+                console.error('Error starting processing:', err);
+                addLogEntry('error', 'Failed to start processing: ' + err.message);
+            });
+            
+            // Listen for messages
+            eventSource.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleProgressUpdate(data);
+                } catch (err) {
+                    console.error('Error parsing event data:', err);
+                }
+            };
+            
+            eventSource.onerror = function(event) {
+                console.error('EventSource error:', event);
+                addLogEntry('error', 'Connection error occurred');
+                stopProcessing();
+            };
+        }
+        
+        function stopProcessing() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            
+            isProcessing = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('status').className = 'glass rounded-3xl p-6 mb-8 max-w-6xl mx-auto status-indicator';
+            document.getElementById('status').innerHTML = `
+                <div class="flex items-center">
+                    <div class="w-4 h-4 bg-gray-400 rounded-full mr-4 animate-pulse"></div>
+                    <span class="text-white text-lg font-medium">Processing stopped.</span>
+                </div>
+            `;
+        }
+        
+        function handleProgressUpdate(data) {
+            const { type, message, timestamp, ...details } = data;
+            
+            // Update status
+            if (type === 'start') {
+                document.getElementById('status').innerHTML = `
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-blue-400 rounded-full mr-4 animate-pulse"></div>
+                        <span class="text-white text-lg font-medium">Processing started...</span>
+                    </div>
+                `;
+            } else if (type === 'complete') {
+                document.getElementById('status').className = 'glass rounded-3xl p-6 mb-8 max-w-6xl mx-auto status-indicator';
+                document.getElementById('status').innerHTML = `
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-green-400 rounded-full mr-4"></div>
+                        <span class="text-white text-lg font-medium">Processing completed successfully!</span>
+                    </div>
+                `;
+                showSummary(data.summary);
+                stopProcessing();
+            } else if (type === 'error') {
+                document.getElementById('status').className = 'glass rounded-3xl p-6 mb-8 max-w-6xl mx-auto status-indicator';
+                document.getElementById('status').innerHTML = `
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 bg-red-400 rounded-full mr-4"></div>
+                        <span class="text-white text-lg font-medium">Processing failed: ${message}</span>
+                    </div>
+                `;
+                stopProcessing();
+            }
+            
+            // Add log entry
+            addLogEntry(type, message, details, timestamp);
+        }
+        
+        function addLogEntry(type, message, details = {}, timestamp = null) {
+            const logContainer = document.getElementById('logContainer');
+            const logEntry = document.createElement('div');
+            
+            const time = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+            
+            let content = `<span class="text-gray-400 text-xs">[${time}]</span> ${message}`;
+            
+            // Add relevant details based on type
+            if (details.user_name) {
+                content += ` <span class="text-blue-400 font-medium">(${details.user_name})</span>`;
+            }
+            if (details.character_name) {
+                content += ` - <span class="text-purple-400">${details.character_name}</span>`;
+            }
+            if (details.total_chats) {
+                content += ` - <span class="text-yellow-400">${details.total_chats} chats</span>`;
+            }
+            if (details.batch_num && details.total_batches) {
+                content += ` - <span class="text-green-400">Batch ${details.batch_num}/${details.total_batches}</span>`;
+            }
+            if (details.processed !== undefined) {
+                content += ` - <span class="text-green-400">${details.processed} processed</span>`;
+            }
+            if (details.failed !== undefined) {
+                content += `, <span class="text-red-400">${details.failed} failed</span>`;
+            }
+            if (details.memories !== undefined) {
+                content += `, <span class="text-blue-400">${details.memories} memories</span>`;
+            }
+            
+            // Color coding based on type
+            let bgColor = 'bg-gray-800/30';
+            let borderColor = 'border-gray-700/50';
+            let dotColor = 'bg-gray-400';
+            
+            switch(type) {
+                case 'start':
+                    bgColor = 'bg-blue-900/30';
+                    borderColor = 'border-blue-600/50';
+                    dotColor = 'bg-blue-400';
+                    break;
+                case 'fetch_users':
+                case 'users_fetched':
+                    bgColor = 'bg-indigo-900/30';
+                    borderColor = 'border-indigo-600/50';
+                    dotColor = 'bg-indigo-400';
+                    break;
+                case 'user_start':
+                    bgColor = 'bg-yellow-900/30';
+                    borderColor = 'border-yellow-600/50';
+                    dotColor = 'bg-yellow-400';
+                    break;
+                case 'user_characters':
+                    bgColor = 'bg-orange-900/30';
+                    borderColor = 'border-orange-600/50';
+                    dotColor = 'bg-orange-400';
+                    break;
+                case 'character_start':
+                    bgColor = 'bg-pink-900/30';
+                    borderColor = 'border-pink-600/50';
+                    dotColor = 'bg-pink-400';
+                    break;
+                case 'character_chats':
+                    bgColor = 'bg-red-900/30';
+                    borderColor = 'border-red-600/50';
+                    dotColor = 'bg-red-400';
+                    break;
+                case 'batch_progress':
+                    bgColor = 'bg-cyan-900/30';
+                    borderColor = 'border-cyan-600/50';
+                    dotColor = 'bg-cyan-400';
+                    break;
+                case 'character_complete':
+                    bgColor = 'bg-green-900/30';
+                    borderColor = 'border-green-600/50';
+                    dotColor = 'bg-green-400';
+                    break;
+                case 'user_complete':
+                    bgColor = 'bg-purple-900/30';
+                    borderColor = 'border-purple-600/50';
+                    dotColor = 'bg-purple-400';
+                    break;
+                case 'complete':
+                    bgColor = 'bg-emerald-900/30';
+                    borderColor = 'border-emerald-600/50';
+                    dotColor = 'bg-emerald-400';
+                    break;
+                case 'error':
+                    bgColor = 'bg-red-900/30';
+                    borderColor = 'border-red-600/50';
+                    dotColor = 'bg-red-400';
+                    break;
+            }
+            
+            logEntry.className = `log-entry p-4 ${bgColor} rounded-xl border ${borderColor} transition-all duration-300 hover:scale-[1.02]`;
+            logEntry.innerHTML = `
+                <div class="flex items-center">
+                    <div class="w-2 h-2 ${dotColor} rounded-full mr-3 animate-pulse"></div>
+                    <span class="text-white text-sm">${content}</span>
+                </div>
+            `;
+            
+            logContainer.appendChild(logEntry);
+            
+            // Auto-scroll to bottom
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+        
+        function showSummary(summary) {
+            if (!summary) return;
+            
+            const summaryDiv = document.getElementById('summary');
+            const summaryContent = document.getElementById('summaryContent');
+            
+            const summaryItems = [
+                { label: 'Total Users', value: summary.total_users, icon: '👥', color: 'from-blue-500 to-blue-600' },
+                { label: 'Processed Users', value: summary.processed_users, icon: '✅', color: 'from-green-500 to-green-600' },
+                { label: 'Chats Processed', value: summary.total_chats_processed, icon: '💬', color: 'from-purple-500 to-purple-600' },
+                { label: 'Chats Failed', value: summary.total_chats_failed, icon: '❌', color: 'from-red-500 to-red-600' },
+                { label: 'Memories Created', value: summary.total_memories_created, icon: '🧠', color: 'from-indigo-500 to-indigo-600' },
+                { label: 'Start From User', value: summary.start_from_user || 1, icon: '🚀', color: 'from-yellow-500 to-yellow-600' }
+            ];
+            
+            summaryContent.innerHTML = summaryItems.map(item => `
+                <div class="glass rounded-2xl p-6 text-center">
+                    <div class="text-4xl mb-3">${item.icon}</div>
+                    <div class="text-3xl font-bold bg-gradient-to-r ${item.color} bg-clip-text text-transparent mb-2">${item.value}</div>
+                    <div class="text-gray-300 text-sm">${item.label}</div>
+                </div>
+            `).join('');
+            
+            summaryDiv.style.display = 'block';
+        }
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', function() {
+            if (eventSource) {
+                eventSource.close();
+            }
+        });
+    </script>
+</body>
+</html>
