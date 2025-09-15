@@ -9,7 +9,6 @@ from pymongo import ReturnDocument
 genai.configure(api_key=Config.GEMINI_API_KEY)
 
 def load_summary_prompt(user_name: str = "User") -> str:
-    # print("User Name",user_name)
     prompt_path = os.path.join("app", "system_prompt", "summarize.md")
     if not os.path.isfile(prompt_path):
         raise FileNotFoundError("🛑 summary.md is missing inside system_prompt folder.")
@@ -24,7 +23,6 @@ def load_summary_prompt(user_name: str = "User") -> str:
     return prompt.strip()
 
 def summarize_incremental(previous_summary: str, new_message: str, user_name: str) -> str:
-    # Load system prompt from inputsummary.txt
     prompt_path = os.path.join("app", "system_prompt", "inputsummary.md")
 
     if not os.path.exists(prompt_path):
@@ -33,7 +31,6 @@ def summarize_incremental(previous_summary: str, new_message: str, user_name: st
     with open(prompt_path, "r", encoding="utf-8") as f:
         system_prompt = f.read().strip()
 
-    # Replace placeholder if present
     system_prompt = system_prompt.replace("{{userName}}", user_name or "User")
 
     # Human instructions and input
@@ -42,7 +39,6 @@ def summarize_incremental(previous_summary: str, new_message: str, user_name: st
         f"New Chat Message:\n{new_message.strip()}"
     )
 
-    # Combine system and human message for Gemini
     full_prompt = f"{system_prompt}\n\n{human_message}"
 
     # Initialize Gemini model

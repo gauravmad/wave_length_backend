@@ -79,3 +79,5 @@ def fetch_recent_chats(user_id: str, character_id: str, limit: int = 20) -> str:
     except Exception as e:
         print(f"Error fetching recent chats: {e}")
         return "Error retrieving chat history."
+
+        

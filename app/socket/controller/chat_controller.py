@@ -5,26 +5,30 @@ from typing import Optional
 
 # Save User Message
 def save_user_message(
-    user_id:str, 
-    character_id:str, 
-    message:str, 
-    image_url:Optional[str] = None,
-    audio_url:Optional[str] = None
+    user_id: str, 
+    character_id: str, 
+    message: Optional[str] = None,  # Make message optional
+    image_url: Optional[str] = None,
+    audio_url: Optional[str] = None
 ) -> dict:
     timestamp = datetime.utcnow().isoformat()
     message_data = {
-        "userId":str(user_id),
-        "characterId":str(character_id),
-        "sender":"user",
+        "userId": str(user_id),
+        "characterId": str(character_id),
+        "sender": "user",
         "timestamp": timestamp
     }
 
+    # Add the appropriate field based on what's provided
     if image_url:
         message_data["image_url"] = image_url
     elif audio_url:
         message_data["audio_url"] = audio_url
+    elif message:  # Only add message if it's provided and not None/empty
+        message_data["message"] = message
     else:
-        message_data["message"] = message    
+        # If none of the content fields are provided, raise an error
+        raise ValueError("At least one of message, image_url, or audio_url must be provided")
 
     result = db.chats.insert_one(message_data)
     message_data["_id"] = str(result.inserted_id)  # Convert ObjectId to string
@@ -35,7 +39,7 @@ def save_ai_message(
     user_id: str, 
     character_id: str, 
     message: str,
-    image_url:Optional[str] = None
+    image_url: Optional[str] = None
 ) -> dict:
     timestamp = datetime.utcnow().isoformat()
     message_data = {
@@ -52,7 +56,7 @@ def save_ai_message(
 def fetch_chat_history(
     user_id: str, 
     character_id: str,
-    image_url:Optional[str] = None
+    image_url: Optional[str] = None
 ) -> list:
     """Fetch chat history for a user and character."""
     if not all([user_id, character_id]):
@@ -77,7 +81,7 @@ def update_conversation_summary(
     user_id: str, 
     character_id: str, 
     new_message: str,
-    image_url:Optional[str] = None
+    image_url: Optional[str] = None
 ) -> str:
     """Update conversation summary for a user and character."""
     return update_summary_with_new_message(
