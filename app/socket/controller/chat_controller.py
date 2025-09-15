@@ -4,7 +4,13 @@ from app.memory.summary import update_summary_with_new_message
 from typing import Optional
 
 # Save User Message
-def save_user_message(user_id:str, character_id:str, message:str, image_url:Optional[str] = None) -> dict:
+def save_user_message(
+    user_id:str, 
+    character_id:str, 
+    message:str, 
+    image_url:Optional[str] = None,
+    audio_url:Optional[str] = None
+) -> dict:
     timestamp = datetime.utcnow().isoformat()
     message_data = {
         "userId":str(user_id),
@@ -15,6 +21,8 @@ def save_user_message(user_id:str, character_id:str, message:str, image_url:Opti
 
     if image_url:
         message_data["image_url"] = image_url
+    elif audio_url:
+        message_data["audio_url"] = audio_url
     else:
         message_data["message"] = message    
 
@@ -23,7 +31,12 @@ def save_user_message(user_id:str, character_id:str, message:str, image_url:Opti
     return message_data
 
 # Save AI Message
-def save_ai_message(user_id: str, character_id: str, message: str) -> dict:
+def save_ai_message(
+    user_id: str, 
+    character_id: str, 
+    message: str,
+    image_url:Optional[str] = None
+) -> dict:
     timestamp = datetime.utcnow().isoformat()
     message_data = {
         "userId": str(user_id),
@@ -36,7 +49,11 @@ def save_ai_message(user_id: str, character_id: str, message: str) -> dict:
     return message_data
 
 # Fetch Chat History
-def fetch_chat_history(user_id: str, character_id: str) -> list:
+def fetch_chat_history(
+    user_id: str, 
+    character_id: str,
+    image_url:Optional[str] = None
+) -> list:
     """Fetch chat history for a user and character."""
     if not all([user_id, character_id]):
         raise ValueError("Missing userId or characterId")
@@ -52,10 +69,16 @@ def fetch_chat_history(user_id: str, character_id: str) -> list:
         "sender": msg["sender"],
         "message": msg.get("message"),
         "image_url": msg.get("image_url"),  # Will be None if not present
+        "audio_url": msg.get("audio_url"),  # Will be None if not present
         "timestamp": msg["timestamp"]
     } for msg in messages]
 
-def update_conversation_summary(user_id: str, character_id: str, new_message: str) -> str:
+def update_conversation_summary(
+    user_id: str, 
+    character_id: str, 
+    new_message: str,
+    image_url:Optional[str] = None
+) -> str:
     """Update conversation summary for a user and character."""
     return update_summary_with_new_message(
         user_id=user_id,

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Socket Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"], input[type="file"], select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+        input[type="file"] {
+            border: 2px dashed #ddd;
+            background: #f9f9f9;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            margin: 5px 0;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .messages {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-top: 20px;
+            background: #f9f9f9;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            background: white;
+            border-left: 4px solid #007bff;
+        }
+        .message.user {
+            border-left-color: #28a745;
+        }
+        .message.ai {
+            border-left-color: #ffc107;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 Audio Socket Test</h1>
+        
+        <div class="form-group">
+            <label for="userId">User ID:</label>
+            <input type="text" id="userId" value="test_user_123" placeholder="Enter User ID">
+        </div>
+        
+        <div class="form-group">
+            <label for="characterId">Character ID:</label>
+            <input type="text" id="characterId" value="test_character_456" placeholder="Enter Character ID">
+        </div>
+        
+        <div class="form-group">
+            <label for="characterName">Character Name:</label>
+            <input type="text" id="characterName" value="Test Character" placeholder="Enter Character Name">
+        </div>
+        
+        <div class="form-group">
+            <label for="audioFile">Select Audio File:</label>
+            <input type="file" id="audioFile" accept=".mp3,.wav,.m4a,.aac,.ogg,.opus,.flac">
+            <small>Supported formats: MP3, WAV, M4A, AAC, OGG, OPUS, FLAC</small>
+        </div>
+        
+        <div class="form-group">
+            <label for="language">Language:</label>
+            <select id="language">
+                <option value="en-IN">English (India)</option>
+                <option value="en-US">English (US)</option>
+                <option value="en-GB">English (UK)</option>
+                <option value="hi-IN">Hindi (India)</option>
+                <option value="es-ES">Spanish (Spain)</option>
+                <option value="fr-FR">French (France)</option>
+                <option value="de-DE">German (Germany)</option>
+            </select>
+        </div>
+        
+        <button id="connectBtn">Connect to Socket</button>
+        <button id="uploadBtn" disabled>Upload Audio via Socket</button>
+        <button id="fetchHistoryBtn" disabled>Fetch Chat History</button>
+        
+        <div id="status"></div>
+        <div id="messages" class="messages"></div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        let socket = null;
+        let audioUrl = null;
+
+        // DOM elements
+        const connectBtn = document.getElementById('connectBtn');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const fetchHistoryBtn = document.getElementById('fetchHistoryBtn');
+        const statusDiv = document.getElementById('status');
+        const messagesDiv = document.getElementById('messages');
+
+        // Connect to socket
+        connectBtn.addEventListener('click', function() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+                connectBtn.textContent = 'Connect to Socket';
+                uploadBtn.disabled = true;
+                fetchHistoryBtn.disabled = true;
+                showStatus('Disconnected from socket', 'info');
+                return;
+            }
+
+            socket = io();
+            
+            socket.on('connect', function() {
+                showStatus('✅ Connected to socket server', 'success');
+                connectBtn.textContent = 'Disconnect';
+                uploadBtn.disabled = false;
+                fetchHistoryBtn.disabled = false;
+            });
+
+            socket.on('disconnect', function() {
+                showStatus('❌ Disconnected from socket server', 'error');
+                connectBtn.textContent = 'Connect to Socket';
+                uploadBtn.disabled = true;
+                fetchHistoryBtn.disabled = true;
+            });
+
+            socket.on('message_sent', function(data) {
+                showStatus('✅ Message sent successfully!', 'success');
+                addMessage(data, 'user');
+            });
+
+            socket.on('message_error', function(data) {
+                showStatus(`❌ Error: ${data.error}`, 'error');
+            });
+
+            socket.on('receive_chat_history', function(data) {
+                showStatus(`📜 Received ${data.messages.length} messages from history`, 'info');
+                messagesDiv.innerHTML = '';
+                data.messages.forEach(msg => {
+                    addMessage(msg, msg.sender);
+                });
+            });
+
+            socket.on('chat_history_error', function(data) {
+                showStatus(`❌ Chat history error: ${data.error}`, 'error');
+            });
+
+            socket.on('receive_message', function(data) {
+                showStatus('🤖 AI response received!', 'success');
+                addMessage(data, 'ai');
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Upload Audio via Socket';
+            });
+        });
+
+        // Upload audio file directly via socket
+        uploadBtn.addEventListener('click', async function() {
+            const audioFile = document.getElementById('audioFile').files[0];
+            if (!audioFile) {
+                showStatus('Please select an audio file first', 'error');
+                return;
+            }
+
+            if (!socket || !socket.connected) {
+                showStatus('Please connect to socket first', 'error');
+                return;
+            }
+
+            try {
+                uploadBtn.disabled = true;
+                uploadBtn.textContent = 'Processing...';
+                showStatus('🎤 Processing audio file...', 'info');
+
+                // Create FormData with audio file and metadata
+                const formData = new FormData();
+                formData.append('audio', audioFile);
+                formData.append('userId', document.getElementById('userId').value);
+                formData.append('characterId', document.getElementById('characterId').value);
+                formData.append('characterName', document.getElementById('characterName').value);
+                formData.append('language', document.getElementById('language').value);
+
+                // Send audio file directly via socket
+                socket.emit('upload_audio', formData);
+                showStatus('🎤 Sending audio file via socket...', 'info');
+                
+            } catch (error) {
+                showStatus(`❌ Upload error: ${error.message}`, 'error');
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Upload Audio via Socket';
+            }
+        });
+
+        // Fetch chat history
+        fetchHistoryBtn.addEventListener('click', function() {
+            if (!socket || !socket.connected) {
+                showStatus('Please connect to socket first', 'error');
+                return;
+            }
+
+            const data = {
+                userId: document.getElementById('userId').value,
+                characterId: document.getElementById('characterId').value
+            };
+
+            socket.emit('fetch_chat_history', data);
+            showStatus('📜 Fetching chat history...', 'info');
+        });
+
+        function showStatus(message, type) {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
+
+        function addMessage(data, sender) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}`;
+            
+            let content = `<strong>${sender.toUpperCase()}:</strong><br>`;
+            
+            if (data.message) {
+                content += `📝 ${data.message}<br>`;
+            }
+            
+            if (data.audio_url) {
+                content += `🎤 <a href="${data.audio_url}" target="_blank">Audio File</a><br>`;
+            }
+            
+            if (data.image_url) {
+                content += `🖼️ <a href="${data.image_url}" target="_blank">Image File</a><br>`;
+            }
+            
+            if (data.transcription) {
+                content += `📊 Transcription Status: ${data.transcription.RecognitionStatus}<br>`;
+                content += `⏱️ Duration: ${data.transcription.Duration}μs<br>`;
+            }
+            
+            content += `🕒 ${new Date(data.timestamp).toLocaleString()}`;
+            
+            messageDiv.innerHTML = content;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+    </script>
+</body>
+</html>

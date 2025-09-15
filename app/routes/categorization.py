@@ -328,21 +328,28 @@ def generate_all_users_categorization():
         # Get optional parameters
         session_gap = int(request.json.get('session_gap', 30)) if request.json else 30
         force_regenerate = request.json.get('force_regenerate', False) if request.json else False
-        
-        logger.info(f"Starting bulk categorization for all users with session_gap={session_gap}, force_regenerate={force_regenerate}")
-        
+        start_index = int(request.json.get('start_index', 0)) if request.json else 0  # NEW
+
+        logger.info(
+            f"Starting bulk categorization for all users with "
+            f"session_gap={session_gap}, force_regenerate={force_regenerate}, start_index={start_index}"
+        )
+
         # Fetch all users from the database
         users_cursor = db.users.find({}, {"_id": 1, "userName": 1})
         all_users = list(users_cursor)
-        
+
         if not all_users:
             return jsonify({"error": "No users found in the system"}), 404
-        
-        logger.info(f"Found {len(all_users)} users to process")
-        
+
+        logger.info(f"Found {len(all_users)} total users, starting from index {start_index}")
+
+        # Slice users starting from start_index
+        all_users = all_users[start_index:]
+
         # Initialize Gemini service
         gemini = GeminiService()
-        
+
         # Results tracking
         results = {
             "total_users": len(all_users),
@@ -353,15 +360,15 @@ def generate_all_users_categorization():
             "user_results": [],
             "started_at": datetime.now().isoformat()
         }
-        
+
         # Process each user
-        for idx, user in enumerate(all_users, start=1):
+        for idx, user in enumerate(all_users, start=start_index + 1):
             user_id = str(user["_id"])
             user_name = user.get("userName", "Unknown")
-            
+
             logger.info("")
-            logger.info(f"Processing user {idx}/{len(all_users)}: {user_name} (ID: {user_id})")
-            
+            logger.info(f"Processing user {idx}/{start_index + len(all_users)}: {user_name} (ID: {user_id})")
+
             try:
                 # Check if user already has categorization data (unless force regenerate)
                 if not force_regenerate:
@@ -376,13 +383,13 @@ def generate_all_users_categorization():
                             "reason": "Already has categorization data"
                         })
                         continue
-                
+
                 # Get user sessions
                 session_data = calculate_user_sessions_with_chats(user_id, session_gap)
                 total_sessions = len(session_data.get("sessions", []))
-                
+
                 logger.info(f"User {user_name}: Found {total_sessions} sessions")
-                
+
                 if not session_data["sessions"]:
                     logger.warning(f"User {user_name}: No sessions found, skipping...")
                     results["skipped_users"] += 1
@@ -393,20 +400,20 @@ def generate_all_users_categorization():
                         "reason": "No sessions found"
                     })
                     continue
-                
+
                 # Process sessions for this user
                 user_session_results = []
-                
+
                 for session_idx, session in enumerate(session_data["sessions"], start=1):
                     logger.info(f"  Processing session {session_idx}/{total_sessions} for user {user_name}")
-                    
+
                     # Extract messages
                     messages = []
                     for chat in session["chats"]:
                         message = chat.get("message", "").strip()
                         if message and not message.startswith("⚠️"):
                             messages.append(message)
-                    
+
                     if not messages:
                         category_result = {
                             "primary_category": "Other",
@@ -417,21 +424,21 @@ def generate_all_users_categorization():
                         try:
                             prompt = create_simple_prompt(messages)
                             response = gemini.generate_response(prompt, temperature=0.3)
-                            
+
                             response = response.strip()
                             if response.startswith("```json"):
                                 response = response.replace("```json", "").replace("```", "")
-                            
+
                             category_result = json.loads(response)
                             logger.info(f"  Session {session_idx} categorized: {category_result}")
                         except Exception as e:
                             logger.error(f"  Gemini error for session {session['sessionId']}: {e}")
                             category_result = {
-                                "primary_category": "Other", 
+                                "primary_category": "Other",
                                 "sub_category": "N/A",
                                 "error": str(e)
                             }
-                    
+
                     # Store session result
                     session_result = {
                         "session_id": session["sessionId"],
@@ -439,14 +446,14 @@ def generate_all_users_categorization():
                         "primary_category": category_result["primary_category"],
                         "sub_category": category_result.get("sub_category", "N/A"),
                         "session_start": session["startTime"],
-                        "session_end": session["endTime"], 
+                        "session_end": session["endTime"],
                         "chat_count": session["chatCount"],
                         "duration_minutes": session["durationMinutes"],
                         "processed_at": datetime.now().isoformat()
                     }
-                    
+
                     user_session_results.append(session_result)
-                
+
                 # Save user categorization to database
                 user_doc = {
                     "user_id": user_id,
@@ -455,15 +462,15 @@ def generate_all_users_categorization():
                     "processed_at": datetime.now().isoformat(),
                     "sessions": user_session_results
                 }
-                
+
                 db.categorizations.replace_one(
                     {"user_id": user_id},
                     user_doc,
                     upsert=True
                 )
-                
+
                 logger.info(f"User {user_name}: Saved {len(user_session_results)} sessions to DB")
-                
+
                 results["successful_users"] += 1
                 results["user_results"].append({
                     "user_id": user_id,
@@ -471,7 +478,7 @@ def generate_all_users_categorization():
                     "status": "success",
                     "sessions_processed": len(user_session_results)
                 })
-                
+
             except Exception as e:
                 logger.error(f"Error processing user {user_name} (ID: {user_id}): {e}")
                 results["failed_users"] += 1
@@ -481,25 +488,27 @@ def generate_all_users_categorization():
                     "status": "failed",
                     "error": str(e)
                 })
-            
+
             results["processed_users"] += 1
-        
+
         # Add completion timestamp
         results["completed_at"] = datetime.now().isoformat()
-        
-        logger.info(f"Bulk categorization completed: {results['successful_users']} successful, {results['failed_users']} failed, {results['skipped_users']} skipped")
-        
+
+        logger.info(
+            f"Bulk categorization completed: {results['successful_users']} successful, "
+            f"{results['failed_users']} failed, {results['skipped_users']} skipped"
+        )
+
         return jsonify({
             "success": True,
             "message": "Bulk categorization completed",
             "results": results
         })
-        
+
     except Exception as e:
         logger.error(f"Error during bulk categorization: {e}")
         return jsonify({"error": str(e)}), 500
-
-
+        
 # Give me Global Statistics
 @user_categorization_bp.route('/global-stats', methods=["GET"])
 def get_global_categorization_stats():

@@ -28,3 +28,4 @@ mem0ai
 chromadb
 qdrant-client
 google-genai
+requests

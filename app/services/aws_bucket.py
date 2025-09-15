@@ -110,3 +110,69 @@ def handle_image_upload(file):
         raise Exception("AWS credentials not available")
     except Exception as e:
         raise Exception(f"Image upload failed: {str(e)}")
+
+def handle_voice_upload(file):
+    """
+    Upload voice/audio file to S3 in voice-notes folder
+    """
+    try:
+        s3 = boto3.client(
+            's3',
+            aws_access_key_id=Config.AWS_ACCESS_KEY,
+            aws_secret_access_key=Config.AWS_SECRET_ACCESS_KEY,
+            region_name=Config.AWS_REGION
+        )
+
+        # Get file extension
+        file_extension = os.path.splitext(file.filename)[1].lower()
+        
+        # Validate file type
+        allowed_extensions = ['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.opus', '.flac']
+        if file_extension not in allowed_extensions:
+            raise Exception(f"Unsupported audio format. Allowed formats: {', '.join(allowed_extensions)}")
+
+        # Sanitize the filename
+        safe_name = sanitize_filename(file.filename)
+        
+        # Add timestamp for uniqueness
+        now = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Add a short UUID for extra uniqueness
+        short_uuid = str(uuid.uuid4())[:8]
+        
+        # Create safe filename with original extension
+        unique_filename = f"{safe_name}_{now}_{short_uuid}{file_extension}"
+        key = f"voice-notes/{unique_filename}"
+
+        # Determine content type based on extension
+        content_type_map = {
+            '.mp3': 'audio/mpeg',
+            '.wav': 'audio/wav',
+            '.m4a': 'audio/mp4',
+            '.aac': 'audio/aac',
+            '.ogg': 'audio/ogg',
+            '.opus': 'audio/opus',
+            '.flac': 'audio/flac'
+        }
+        content_type = content_type_map.get(file_extension, 'audio/mpeg')
+
+        # Upload to S3
+        s3.upload_fileobj(
+            file.stream,
+            Config.AWS_S3_BUCKET_NAME,
+            key,
+            ExtraArgs={
+                "ContentType": content_type,
+                "CacheControl": "max-age=3600"  # 1 hour cache for voice files
+            }
+        )
+
+        # Generate the URL
+        file_url = f"https://{Config.AWS_S3_BUCKET_NAME}.s3.{Config.AWS_REGION}.amazonaws.com/{key}"
+        
+        return file_url
+
+    except NoCredentialsError:
+        raise Exception("AWS credentials not available")
+    except Exception as e:
+        raise Exception(f"Voice file upload failed: {str(e)}")

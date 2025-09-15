@@ -31,6 +31,10 @@ class Config:
     
     # Memory settings
     MEM0_COLLECTION_NAME = os.getenv('MEM0_COLLECTION_NAME', 'chat_memories')
+
+    # AZURE VOICE SPEECH TO TEXT
+    AZURE_SPEECH_TO_TEXT_API_URL = os.getenv('AZURE_SPEECH_TO_TEXT_API_URL')
+    AZURE_SPEECH_TO_TEXT_API_KEY = os.getenv('AZURE_SPEECH_TO_TEXT_API_KEY')
     
     @classmethod
     def validate_qdrant_config(cls) -> None:
@@ -81,3 +85,5 @@ class Config:
             "api_key_set": bool(cls.QDRANT_API_KEY),
             "gemini_key_set": bool(cls.GEMINI_API_KEY)
         }
+
+        
