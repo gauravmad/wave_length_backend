@@ -53,6 +53,66 @@ def get_session_categorization(user_id, session_id):
             "sub_category": "N/A"
         }
 
+def get_day_categorization(user_id, date_str, day_sessions):
+    """Get categorization data for a specific day based on sessions within that day"""
+    try:
+        # Find user's categorization data
+        user_categorization = db.categorizations.find_one({"user_id": user_id})
+        
+        if not user_categorization or not user_categorization.get("sessions"):
+            return {
+                "primary_category": "Not Categorized",
+                "sub_category": "N/A"
+            }
+        
+        # Collect all categories for sessions that occur on this day
+        day_categories = []
+        for session_data in day_sessions:
+            # For each session in the day, find its categorization
+            for session in user_categorization["sessions"]:
+                if session.get("session_id") == session_data.get("session_id"):
+                    day_categories.append({
+                        "primary_category": session.get("primary_category", "Not Categorized"),
+                        "sub_category": session.get("sub_category", "N/A")
+                    })
+        
+        if not day_categories:
+            return {
+                "primary_category": "Not Categorized",
+                "sub_category": "N/A"
+            }
+        
+        # If multiple sessions in a day, use the most frequent primary category
+        primary_counts = {}
+        for cat in day_categories:
+            primary = cat["primary_category"]
+            if primary in primary_counts:
+                primary_counts[primary] += 1
+            else:
+                primary_counts[primary] = 1
+        
+        # Get the most frequent primary category
+        most_frequent_primary = max(primary_counts, key=primary_counts.get)
+        
+        # Get corresponding sub_category for the most frequent primary
+        corresponding_sub = "N/A"
+        for cat in day_categories:
+            if cat["primary_category"] == most_frequent_primary:
+                corresponding_sub = cat["sub_category"]
+                break
+        
+        return {
+            "primary_category": most_frequent_primary,
+            "sub_category": corresponding_sub,
+            "session_categories": day_categories  # Include all session categories for reference
+        }
+        
+    except Exception as e:
+        return {
+            "primary_category": "Not Categorized",
+            "sub_category": "N/A"
+        }
+
 def calculate_user_sessions(user_id, session_gap_minutes=30):
     """Calculate sessions for a specific user based on continuous chat activity"""
     
@@ -620,6 +680,442 @@ def get_daily_user_stats():
             "totalActiveUsers": len(active_users),
             "totalChatsToday": len(daily_chats),
             "activeUsers": sorted(active_users, key=lambda x: x["chatsToday"], reverse=True)
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+def calculate_user_day_wise_analytics(user_id, start_date=None, end_date=None):
+    """Calculate day-wise analytics for a specific user"""
+    
+    # Set default date range if not provided
+    if not end_date:
+        end_date = datetime.now()
+    if not start_date:
+        start_date = end_date - timedelta(days=30)  # Default to last 30 days
+    
+    # Ensure start_date is before end_date
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+    
+    # Get all chats for the user in the date range
+    chats = list(db.chats.find({
+        "userId": user_id,
+        "timestamp": {
+            "$gte": start_date.isoformat(),
+            "$lte": end_date.isoformat()
+        }
+    }).sort("timestamp", 1))
+    
+    # Group chats by day
+    daily_data = defaultdict(lambda: {
+        "date": None,
+        "chatCount": 0,
+        "chats": [],
+        "durationMinutes": 0,
+        "firstChatTime": None,
+        "lastChatTime": None,
+        "userMessages": 0,
+        "botMessages": 0
+    })
+    
+    for chat in chats:
+        chat_time = parse_timestamp(chat["timestamp"])
+        chat_date = chat_time.date()
+        date_str = chat_date.strftime('%Y-%m-%d')
+        
+        # Initialize day data
+        if daily_data[date_str]["date"] is None:
+            daily_data[date_str]["date"] = date_str
+            daily_data[date_str]["firstChatTime"] = chat["timestamp"]
+        
+        # Update day data
+        daily_data[date_str]["chatCount"] += 1
+        daily_data[date_str]["lastChatTime"] = chat["timestamp"]
+        daily_data[date_str]["chats"].append({
+            "chatId": str(chat["_id"]),
+            "message": chat.get("message", ""),
+            "timestamp": chat["timestamp"],
+            "sender": chat.get("sender", "User")
+        })
+        
+        # Count messages by sender
+        sender = chat.get("sender", "User")
+        if sender.lower() == "user":
+            daily_data[date_str]["userMessages"] += 1
+        else:
+            daily_data[date_str]["botMessages"] += 1
+    
+    # Calculate proper session-based duration for each day
+    for date_str in daily_data:
+        day_data = daily_data[date_str]
+        day_chats = day_data["chats"]
+        
+        if len(day_chats) <= 1:
+            day_data["durationMinutes"] = 0
+            continue
+        
+        # Group chats into sessions based on time gaps (similar to session analytics)
+        session_gap_seconds = 30 * 60  # 30 minutes gap
+        sessions = []
+        current_session = [day_chats[0]]
+        
+        for i in range(1, len(day_chats)):
+            current_chat_time = parse_timestamp(day_chats[i]["timestamp"])
+            prev_chat_time = parse_timestamp(day_chats[i-1]["timestamp"])
+            time_gap = (current_chat_time - prev_chat_time).total_seconds()
+            
+            if time_gap <= session_gap_seconds:
+                current_session.append(day_chats[i])
+            else:
+                sessions.append(current_session)
+                current_session = [day_chats[i]]
+        
+        # Add the last session
+        if current_session:
+            sessions.append(current_session)
+        
+        # Calculate total duration from all sessions
+        total_duration = 0
+        for session in sessions:
+            if len(session) > 1:
+                session_start = parse_timestamp(session[0]["timestamp"])
+                session_end = parse_timestamp(session[-1]["timestamp"])
+                session_duration = (session_end - session_start).total_seconds() / 60
+                total_duration += session_duration
+        
+        day_data["durationMinutes"] = round(total_duration, 2)
+        
+        # Store session information for categorization
+        day_data["sessions"] = sessions
+    
+    # Get user's full session data for categorization mapping
+    user_session_data = calculate_user_sessions(user_id, 30)
+    
+    # Convert to list and sort by date
+    daily_analytics = []
+    for date_str in sorted(daily_data.keys()):
+        day_data = daily_data[date_str]
+        
+        # Map day sessions to user sessions for categorization
+        day_sessions_for_categorization = []
+        for session_idx, session in enumerate(user_session_data.get("sessions", [])):
+            session_date = parse_timestamp(session["startTime"]).date().strftime('%Y-%m-%d')
+            if session_date == date_str:
+                day_sessions_for_categorization.append({
+                    "session_id": session["sessionId"],
+                    "categorization": session.get("categorization", {})
+                })
+        
+        # Get categorization for this day
+        day_categorization = get_day_categorization(user_id, date_str, day_sessions_for_categorization)
+        
+        # Remove detailed chats from response (can be included optionally)
+        day_summary = {
+            "date": day_data["date"],
+            "chatCount": day_data["chatCount"],
+            "durationMinutes": day_data["durationMinutes"],
+            "firstChatTime": day_data["firstChatTime"],
+            "lastChatTime": day_data["lastChatTime"],
+            "userMessages": day_data["userMessages"],
+            "botMessages": day_data["botMessages"],
+            "categorization": {
+                "primary_category": day_categorization["primary_category"],
+                "sub_category": day_categorization["sub_category"]
+            }
+        }
+        daily_analytics.append(day_summary)
+    
+    # Calculate summary statistics
+    total_chats = sum(day["chatCount"] for day in daily_analytics)
+    total_duration = sum(day["durationMinutes"] for day in daily_analytics)
+    active_days = len(daily_analytics)
+    avg_chats_per_day = total_chats / active_days if active_days > 0 else 0
+    avg_duration_per_day = total_duration / active_days if active_days > 0 else 0
+    
+    return {
+        "userId": user_id,
+        "dateRange": {
+            "startDate": start_date.strftime('%Y-%m-%d'),
+            "endDate": end_date.strftime('%Y-%m-%d'),
+            "totalDays": (end_date - start_date).days + 1
+        },
+        "summary": {
+            "totalChats": total_chats,
+            "totalDurationMinutes": round(total_duration, 2),
+            "activeDays": active_days,
+            "avgChatsPerDay": round(avg_chats_per_day, 2),
+            "avgDurationPerDay": round(avg_duration_per_day, 2)
+        },
+        "dailyAnalytics": daily_analytics
+    }
+
+def calculate_user_day_wise_analytics_with_chats(user_id, start_date=None, end_date=None):
+    """Calculate day-wise analytics for a specific user with detailed chat information"""
+    
+    # Set default date range if not provided
+    if not end_date:
+        end_date = datetime.now()
+    if not start_date:
+        start_date = end_date - timedelta(days=30)  # Default to last 30 days
+    
+    # Ensure start_date is before end_date
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+    
+    # Get all chats for the user in the date range
+    chats = list(db.chats.find({
+        "userId": user_id,
+        "timestamp": {
+            "$gte": start_date.isoformat(),
+            "$lte": end_date.isoformat()
+        }
+    }).sort("timestamp", 1))
+    
+    # Group chats by day
+    daily_data = defaultdict(lambda: {
+        "date": None,
+        "chatCount": 0,
+        "chats": [],
+        "durationMinutes": 0,
+        "firstChatTime": None,
+        "lastChatTime": None,
+        "userMessages": 0,
+        "botMessages": 0
+    })
+    
+    for chat in chats:
+        chat_time = parse_timestamp(chat["timestamp"])
+        chat_date = chat_time.date()
+        date_str = chat_date.strftime('%Y-%m-%d')
+        
+        # Initialize day data
+        if daily_data[date_str]["date"] is None:
+            daily_data[date_str]["date"] = date_str
+            daily_data[date_str]["firstChatTime"] = chat["timestamp"]
+        
+        # Update day data
+        daily_data[date_str]["chatCount"] += 1
+        daily_data[date_str]["lastChatTime"] = chat["timestamp"]
+        daily_data[date_str]["chats"].append({
+            "chatId": str(chat["_id"]),
+            "message": chat.get("message", ""),
+            "timestamp": chat["timestamp"],
+            "sender": chat.get("sender", "User")
+        })
+        
+        # Count messages by sender
+        sender = chat.get("sender", "User")
+        if sender.lower() == "user":
+            daily_data[date_str]["userMessages"] += 1
+        else:
+            daily_data[date_str]["botMessages"] += 1
+    
+    # Calculate proper session-based duration for each day
+    for date_str in daily_data:
+        day_data = daily_data[date_str]
+        day_chats = day_data["chats"]
+        
+        if len(day_chats) <= 1:
+            day_data["durationMinutes"] = 0
+            continue
+        
+        # Group chats into sessions based on time gaps (similar to session analytics)
+        session_gap_seconds = 30 * 60  # 30 minutes gap
+        sessions = []
+        current_session = [day_chats[0]]
+        
+        for i in range(1, len(day_chats)):
+            current_chat_time = parse_timestamp(day_chats[i]["timestamp"])
+            prev_chat_time = parse_timestamp(day_chats[i-1]["timestamp"])
+            time_gap = (current_chat_time - prev_chat_time).total_seconds()
+            
+            if time_gap <= session_gap_seconds:
+                current_session.append(day_chats[i])
+            else:
+                sessions.append(current_session)
+                current_session = [day_chats[i]]
+        
+        # Add the last session
+        if current_session:
+            sessions.append(current_session)
+        
+        # Calculate total duration from all sessions
+        total_duration = 0
+        for session in sessions:
+            if len(session) > 1:
+                session_start = parse_timestamp(session[0]["timestamp"])
+                session_end = parse_timestamp(session[-1]["timestamp"])
+                session_duration = (session_end - session_start).total_seconds() / 60
+                total_duration += session_duration
+        
+        day_data["durationMinutes"] = round(total_duration, 2)
+        
+        # Store session information for categorization
+        day_data["sessions"] = sessions
+    
+    # Get user's full session data for categorization mapping
+    user_session_data = calculate_user_sessions(user_id, 30)
+    
+    # Convert to list and sort by date
+    daily_analytics = []
+    for date_str in sorted(daily_data.keys()):
+        day_data = daily_data[date_str]
+        
+        # Map day sessions to user sessions for categorization
+        day_sessions_for_categorization = []
+        for session_idx, session in enumerate(user_session_data.get("sessions", [])):
+            session_date = parse_timestamp(session["startTime"]).date().strftime('%Y-%m-%d')
+            if session_date == date_str:
+                day_sessions_for_categorization.append({
+                    "session_id": session["sessionId"],
+                    "categorization": session.get("categorization", {})
+                })
+        
+        # Get categorization for this day
+        day_categorization = get_day_categorization(user_id, date_str, day_sessions_for_categorization)
+        
+        # Add categorization to day data
+        day_data["categorization"] = {
+            "primary_category": day_categorization["primary_category"],
+            "sub_category": day_categorization["sub_category"]
+        }
+        
+        daily_analytics.append(day_data)
+    
+    # Calculate summary statistics
+    total_chats = sum(day["chatCount"] for day in daily_analytics)
+    total_duration = sum(day["durationMinutes"] for day in daily_analytics)
+    active_days = len(daily_analytics)
+    avg_chats_per_day = total_chats / active_days if active_days > 0 else 0
+    avg_duration_per_day = total_duration / active_days if active_days > 0 else 0
+    
+    return {
+        "userId": user_id,
+        "dateRange": {
+            "startDate": start_date.strftime('%Y-%m-%d'),
+            "endDate": end_date.strftime('%Y-%m-%d'),
+            "totalDays": (end_date - start_date).days + 1
+        },
+        "summary": {
+            "totalChats": total_chats,
+            "totalDurationMinutes": round(total_duration, 2),
+            "activeDays": active_days,
+            "avgChatsPerDay": round(avg_chats_per_day, 2),
+            "avgDurationPerDay": round(avg_duration_per_day, 2)
+        },
+        "dailyAnalytics": daily_analytics
+    }
+
+@user_analytics_bp.route('/day-wise-analytics', methods=['GET'])
+def get_user_day_wise_analytics():
+    """
+    Get day-wise analytics for a specific user with filtering options
+    Query params:
+    - user_id: required - specific user ID
+    - filter: week/month/custom (default: month)
+    - start_date: YYYY-MM-DD format (for custom filter)
+    - end_date: YYYY-MM-DD format (for custom filter)
+    - include_chats: include detailed chat information for each day (default: false)
+    - primary_category: filter by primary category (optional)
+    - sub_category: filter by sub category (optional)
+    """
+    
+    try:
+        user_id = request.args.get('user_id')
+        filter_type = request.args.get('filter', 'month')
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
+        include_chats = request.args.get('include_chats', 'false').lower() == 'true'
+        primary_category_filter = request.args.get('primary_category')
+        sub_category_filter = request.args.get('sub_category')
+        
+        if not user_id:
+            return jsonify({"error": "user_id is required"}), 400
+        
+        # Check if user exists
+        user = db.users.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+        
+        # Calculate date range based on filter
+        end_date = datetime.now()
+        
+        if filter_type == 'week':
+            start_date = end_date - timedelta(days=7)
+        elif filter_type == 'month':
+            start_date = end_date - timedelta(days=30)
+        elif filter_type == 'custom':
+            if not start_date_str or not end_date_str:
+                return jsonify({"error": "start_date and end_date are required for custom filter"}), 400
+            try:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            except ValueError:
+                return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+        else:
+            return jsonify({"error": "Invalid filter type. Use 'week', 'month', or 'custom'"}), 400
+        
+        # Get day-wise analytics
+        if include_chats:
+            analytics_data = calculate_user_day_wise_analytics_with_chats(user_id, start_date, end_date)
+        else:
+            analytics_data = calculate_user_day_wise_analytics(user_id, start_date, end_date)
+        
+        # Apply category filters if provided
+        if primary_category_filter or sub_category_filter:
+            filtered_daily_analytics = []
+            for day in analytics_data["dailyAnalytics"]:
+                categorization = day.get("categorization", {})
+                
+                # Check primary category filter
+                if primary_category_filter:
+                    if categorization.get("primary_category", "").lower() != primary_category_filter.lower():
+                        continue
+                
+                # Check sub category filter
+                if sub_category_filter:
+                    if categorization.get("sub_category", "").lower() != sub_category_filter.lower():
+                        continue
+                
+                filtered_daily_analytics.append(day)
+            
+            # Recalculate summary statistics for filtered data
+            total_chats = sum(day["chatCount"] for day in filtered_daily_analytics)
+            total_duration = sum(day["durationMinutes"] for day in filtered_daily_analytics)
+            active_days = len(filtered_daily_analytics)
+            avg_chats_per_day = total_chats / active_days if active_days > 0 else 0
+            avg_duration_per_day = total_duration / active_days if active_days > 0 else 0
+            
+            # Update analytics data with filtered results
+            analytics_data["dailyAnalytics"] = filtered_daily_analytics
+            analytics_data["summary"] = {
+                "totalChats": total_chats,
+                "totalDurationMinutes": round(total_duration, 2),
+                "activeDays": active_days,
+                "avgChatsPerDay": round(avg_chats_per_day, 2),
+                "avgDurationPerDay": round(avg_duration_per_day, 2)
+            }
+        
+        # Add user information
+        analytics_data.update({
+            "userName": user.get("userName"),
+            "mobileNumber": user.get("mobileNumber"),
+            "age": user.get("age"),
+            "gender": user.get("gender"),
+            "createdAt": user.get("createdAt"),
+            "lastActiveAt": user.get("lastActiveAt")
+        })
+        
+        return jsonify({
+            "success": True,
+            "filter": filter_type,
+            "includeChats": include_chats,
+            "categoryFilters": {
+                "primary_category": primary_category_filter,
+                "sub_category": sub_category_filter
+            },
+            "data": analytics_data
         })
         
     except Exception as e:
