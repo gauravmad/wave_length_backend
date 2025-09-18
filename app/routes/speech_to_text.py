@@ -189,11 +189,85 @@ def transcribe_audio():
                 "message": "Both user_id and character_id are required"
             }), 400
 
-        # ✅ Upload file to S3
-        print(f"☁️ Starting S3 upload...")
+        # ✅ Read original file data
+        print(f"📁 Reading original file data...")
+        try:
+            file.seek(0)  # Reset file pointer to beginning
+            original_audio_data = file.read()
+            print(f"📊 Original audio data size: {len(original_audio_data)} bytes")
+        except Exception as e:
+            print(f"❌ Failed to read original file: {str(e)}")
+            return jsonify({
+                "error": "Failed to read audio file",
+                "message": str(e)
+            }), 500
+
+        # ✅ Detect audio format and convert if necessary
+        print(f"🔍 Detecting audio format...")
+        detected_format = detect_audio_format(original_audio_data)
+        print(f"🎵 Detected audio format: {detected_format}")
+        
+        conversion_time = 0
+        audio_data_for_upload = original_audio_data  # Default to original data
+        final_filename = file.filename  # Default to original filename
+        
+        if detected_format == 'opus':
+            print(f"🔄 Opus format detected - conversion to WAV required")
+            try:
+                conversion_start = time.time()
+                audio_data_for_upload = convert_opus_to_wav(original_audio_data)
+                conversion_time = time.time() - conversion_start
+                content_type = 'audio/wav'
+                # Change filename extension to .wav
+                base_name = os.path.splitext(file.filename)[0]
+                final_filename = f"{base_name}.wav"
+                print(f"✅ Audio converted from Opus to WAV")
+                print(f"📝 Final filename will be: {final_filename}")
+            except Exception as e:
+                print(f"❌ Audio conversion failed: {str(e)}")
+                return jsonify({
+                    "error": "Audio conversion failed",
+                    "message": f"Failed to convert Opus to WAV: {str(e)}"
+                }), 500
+        elif detected_format == 'wav':
+            print(f"✅ WAV format detected - no conversion needed")
+            content_type = 'audio/wav'
+        else:
+            print(f"⚠️ Unsupported or unknown audio format: {detected_format}")
+            # Try to convert anyway using FFmpeg (it supports many formats)
+            try:
+                print(f"🔄 Attempting conversion to WAV...")
+                conversion_start = time.time()
+                audio_data_for_upload = convert_opus_to_wav(original_audio_data)
+                conversion_time = time.time() - conversion_start
+                content_type = 'audio/wav'
+                # Change filename extension to .wav
+                base_name = os.path.splitext(file.filename)[0]
+                final_filename = f"{base_name}.wav"
+                print(f"✅ Audio converted to WAV successfully")
+                print(f"📝 Final filename will be: {final_filename}")
+            except Exception as e:
+                print(f"❌ Audio conversion failed: {str(e)}")
+                return jsonify({
+                    "error": "Unsupported audio format",
+                    "message": f"Detected format: {detected_format}. Conversion failed: {str(e)}"
+                }), 400
+
+        # ✅ Upload the final audio file (WAV format) to S3
+        print(f"☁️ Starting S3 upload of final audio file...")
         s3_start_time = time.time()
         try:
-            file_url = handle_voice_upload(file)
+            # Create a temporary file-like object with the converted audio data
+            import io
+            from werkzeug.datastructures import FileStorage
+            
+            audio_file_obj = FileStorage(
+                stream=io.BytesIO(audio_data_for_upload),
+                filename=final_filename,
+                content_type=content_type
+            )
+            
+            file_url = handle_voice_upload(audio_file_obj)
             s3_upload_time = time.time() - s3_start_time
             print(f"✅ S3 upload successful in {s3_upload_time:.2f}s")
             print(f"🔗 S3 URL: {file_url}")
@@ -204,76 +278,21 @@ def transcribe_audio():
                 "message": str(e)
             }), 500
 
-        # ✅ Download file back from S3 for processing
-        print(f"⬇️ Downloading file from S3 for transcription...")
-        download_start_time = time.time()
-        try:
-            response = requests.get(file_url)
-            response.raise_for_status()
-            original_audio_data = response.content
-            download_time = time.time() - download_start_time
-            print(f"✅ File downloaded successfully in {download_time:.2f}s")
-            print(f"📊 Original audio data size: {len(original_audio_data)} bytes")
-        except Exception as e:
-            print(f"❌ Failed to download audio file: {str(e)}")
-            return jsonify({
-                "error": "Failed to download audio file",
-                "message": str(e)
-            }), 500
-
-        # ✅ Detect audio format and convert if necessary
-        print(f"🔍 Detecting audio format...")
-        detected_format = detect_audio_format(original_audio_data)
-        print(f"🎵 Detected audio format: {detected_format}")
-        
-        conversion_time = 0
-        if detected_format == 'opus':
-            print(f"🔄 Opus format detected - conversion to WAV required")
-            try:
-                conversion_start = time.time()
-                audio_data_for_azure = convert_opus_to_wav(original_audio_data)
-                conversion_time = time.time() - conversion_start
-                content_type = 'audio/wav'
-                print(f"✅ Audio converted from Opus to WAV")
-            except Exception as e:
-                print(f"❌ Audio conversion failed: {str(e)}")
-                return jsonify({
-                    "error": "Audio conversion failed",
-                    "message": f"Failed to convert Opus to WAV: {str(e)}"
-                }), 500
-        elif detected_format == 'wav':
-            print(f"✅ WAV format detected - no conversion needed")
-            audio_data_for_azure = original_audio_data
-            content_type = 'audio/wav'
-        else:
-            print(f"⚠️ Unsupported or unknown audio format: {detected_format}")
-            # Try to convert anyway using FFmpeg (it supports many formats)
-            try:
-                print(f"🔄 Attempting conversion to WAV...")
-                conversion_start = time.time()
-                audio_data_for_azure = convert_opus_to_wav(original_audio_data)
-                conversion_time = time.time() - conversion_start
-                content_type = 'audio/wav'
-                print(f"✅ Audio converted to WAV successfully")
-            except Exception as e:
-                print(f"❌ Audio conversion failed: {str(e)}")
-                return jsonify({
-                    "error": "Unsupported audio format",
-                    "message": f"Detected format: {detected_format}. Conversion failed: {str(e)}"
-                }), 400
+        # ✅ Use the same audio data for Azure processing
+        audio_data_for_azure = audio_data_for_upload
 
         # ✅ Prepare Azure request
         print(f"🤖 Preparing Azure Speech Services request...")
         headers = {
             'Ocp-Apim-Subscription-Key': Config.AZURE_SPEECH_TO_TEXT_API_KEY,
-            'Content-Type': content_type
+            'Content-Type': 'audio/wav'  # Always WAV now since we convert everything to WAV
         }
         api_url = f"{Config.AZURE_SPEECH_TO_TEXT_API_URL}?language={language}"
         
         print(f"🔗 Azure API URL: {api_url}")
         print(f"🔑 Using Azure subscription key: {Config.AZURE_SPEECH_TO_TEXT_API_KEY[:10]}...")
         print(f"📤 Sending {len(audio_data_for_azure)} bytes to Azure Speech Services...")
-        print(f"🎵 Content-Type: {content_type}")
+        print(f"🎵 Content-Type: audio/wav")
 
         azure_start_time = time.time()
         try:
@@ -334,10 +353,9 @@ def transcribe_audio():
                 total_time = time.time() - start_time
                 print(f"🎯 Total processing time: {total_time:.2f}s")
                 print(f"📊 Performance breakdown:")
-                print(f"   - S3 Upload: {s3_upload_time:.2f}s")
-                print(f"   - S3 Download: {download_time:.2f}s")
                 if conversion_time > 0:
                     print(f"   - Audio Conversion: {conversion_time:.2f}s")
+                print(f"   - S3 Upload (WAV): {s3_upload_time:.2f}s")
                 print(f"   - Azure Processing: {azure_processing_time:.2f}s")
                 print(f"   - Memory Service: {memory_time:.2f}s")
                 print(f"   - Database Save: {db_time:.2f}s")
@@ -348,9 +366,10 @@ def transcribe_audio():
                     "Offset": offset,
                     "Duration": duration,
                     "DisplayText": transcribed_text,
-                    "file_url": file_url,
-                    "detected_format": detected_format,
-                    "converted": detected_format == 'opus' or detected_format == 'unknown'
+                    "file_url": file_url,  # This is now always a WAV file URL
+                    "original_format": detected_format,
+                    "final_format": "wav",  # Always WAV now
+                    "converted": detected_format != 'wav'
                 }
                 print(f"📤 Sending response: {response_data}")
                 print(f"🎤 ===== SPEECH-TO-TEXT API REQUEST COMPLETED =====\n")
