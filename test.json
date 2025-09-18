@@ -1,0 +1,235 @@
+{
+    "data": {
+        "cohorts": [
+            {
+                "cohortLabel": "Week of July 28, 2025",
+                "cohortWeek": "2025-07-28",
+                "maxActiveUsers": 2,
+                "retentionRate": 100.0,
+                "totalChatsAllWeeks": 26,
+                "totalDurationAllWeeks": 6.24,
+                "totalUsersInCohort": 2,
+                "weeklyProgress": [
+                    {
+                        "activeUsers": 2,
+                        "avgChatsPerActiveUser": 8.5,
+                        "avgDurationPerActiveUser": 2.33,
+                        "totalChats": 17,
+                        "totalDurationMinutes": 4.66,
+                        "weekEnd": "2025-08-03",
+                        "weekLabel": "Week 1 (07/28 - 08/03)",
+                        "weekNumber": 1,
+                        "weekStart": "2025-07-28"
+                    },
+                    {
+                        "activeUsers": 1,
+                        "avgChatsPerActiveUser": 9.0,
+                        "avgDurationPerActiveUser": 1.58,
+                        "totalChats": 9,
+                        "totalDurationMinutes": 1.58,
+                        "weekEnd": "2025-08-10",
+                        "weekLabel": "Week 2 (08/04 - 08/10)",
+                        "weekNumber": 2,
+                        "weekStart": "2025-08-04"
+                    },
+                    {
+                        "activeUsers": 0,
+                        "avgChatsPerActiveUser": 0,
+                        "avgDurationPerActiveUser": 0,
+                        "totalChats": 0,
+                        "totalDurationMinutes": 0,
+                        "weekEnd": "2025-08-17",
+                        "weekLabel": "Week 3 (08/11 - 08/17)",
+                        "weekNumber": 3,
+                        "weekStart": "2025-08-11"
+                    },
+                    {
+                        "activeUsers": 0,
+                        "avgChatsPerActiveUser": 0,
+                        "avgDurationPerActiveUser": 0,
+                        "totalChats": 0,
+                        "totalDurationMinutes": 0,
+                        "weekEnd": "2025-08-24",
+                        "weekLabel": "Week 4 (08/18 - 08/24)",
+                        "weekNumber": 4,
+                        "weekStart": "2025-08-18"
+                    },
+                    {
+                        "activeUsers": 0,
+                        "avgChatsPerActiveUser": 0,
+                        "avgDurationPerActiveUser": 0,
+                        "totalChats": 0,
+                        "totalDurationMinutes": 0,
+                        "weekEnd": "2025-08-31",
+                        "weekLabel": "Week 5 (08/25 - 08/31)",
+                        "weekNumber": 5,
+                        "weekStart": "2025-08-25"
+                    }
+                ]
+            },
+            {
+                "cohortLabel": "Week of August 04, 2025",
+                "cohortWeek": "2025-08-04",
+                "maxActiveUsers": 29,
+                "retentionRate": 96.67,
+                "totalChatsAllWeeks": 1017,
+                "totalDurationAllWeeks": 544.07,
+                "totalUsersInCohort": 30,
+                "weeklyProgress": [
+                    {
+                        "activeUsers": 29,
+                        "avgChatsPerActiveUser": 25.48,
+                        "avgDurationPerActiveUser": 12.9,
+                        "totalChats": 739,
+                        "totalDurationMinutes": 374.19,
+                        "weekEnd": "2025-08-10",
+                        "weekLabel": "Week 1 (08/04 - 08/10)",
+                        "weekNumber": 1,
+                        "weekStart": "2025-08-04"
+                    },
+                    {
+                        "activeUsers": 6,
+                        "avgChatsPerActiveUser": 30.0,
+                        "avgDurationPerActiveUser": 20.25,
+                        "totalChats": 180,
+                        "totalDurationMinutes": 121.51,
+                        "weekEnd": "2025-08-17",
+                        "weekLabel": "Week 2 (08/11 - 08/17)",
+                        "weekNumber": 2,
+                        "weekStart": "2025-08-11"
+                    },
+                    {
+                        "activeUsers": 4,
+                        "avgChatsPerActiveUser": 22.5,
+                        "avgDurationPerActiveUser": 11.52,
+                        "totalChats": 90,
+                        "totalDurationMinutes": 46.06,
+                        "weekEnd": "2025-08-24",
+                        "weekLabel": "Week 3 (08/18 - 08/24)",
+                        "weekNumber": 3,
+                        "weekStart": "2025-08-18"
+                    },
+                    {
+                        "activeUsers": 1,
+                        "avgChatsPerActiveUser": 8.0,
+                        "avgDurationPerActiveUser": 2.31,
+                        "totalChats": 8,
+                        "totalDurationMinutes": 2.31,
+                        "weekEnd": "2025-08-31",
+                        "weekLabel": "Week 4 (08/25 - 08/31)",
+                        "weekNumber": 4,
+                        "weekStart": "2025-08-25"
+                    }
+                ]
+            },
+            {
+                "cohortLabel": "Week of August 11, 2025",
+                "cohortWeek": "2025-08-11",
+                "maxActiveUsers": 39,
+                "retentionRate": 90.7,
+                "totalChatsAllWeeks": 1200,
+                "totalDurationAllWeeks": 577.24,
+                "totalUsersInCohort": 43,
+                "weeklyProgress": [
+                    {
+                        "activeUsers": 39,
+                        "avgChatsPerActiveUser": 21.74,
+                        "avgDurationPerActiveUser": 10.08,
+                        "totalChats": 848,
+                        "totalDurationMinutes": 393.0,
+                        "weekEnd": "2025-08-17",
+                        "weekLabel": "Week 1 (08/11 - 08/17)",
+                        "weekNumber": 1,
+                        "weekStart": "2025-08-11"
+                    },
+                    {
+                        "activeUsers": 3,
+                        "avgChatsPerActiveUser": 76.0,
+                        "avgDurationPerActiveUser": 35.85,
+                        "totalChats": 228,
+                        "totalDurationMinutes": 107.56,
+                        "weekEnd": "2025-08-24",
+                        "weekLabel": "Week 2 (08/18 - 08/24)",
+                        "weekNumber": 2,
+                        "weekStart": "2025-08-18"
+                    },
+                    {
+                        "activeUsers": 6,
+                        "avgChatsPerActiveUser": 20.67,
+                        "avgDurationPerActiveUser": 12.78,
+                        "totalChats": 124,
+                        "totalDurationMinutes": 76.68,
+                        "weekEnd": "2025-08-31",
+                        "weekLabel": "Week 3 (08/25 - 08/31)",
+                        "weekNumber": 3,
+                        "weekStart": "2025-08-25"
+                    }
+                ]
+            },
+            {
+                "cohortLabel": "Week of August 18, 2025",
+                "cohortWeek": "2025-08-18",
+                "maxActiveUsers": 42,
+                "retentionRate": 93.33,
+                "totalChatsAllWeeks": 2071,
+                "totalDurationAllWeeks": 862.74,
+                "totalUsersInCohort": 45,
+                "weeklyProgress": [
+                    {
+                        "activeUsers": 42,
+                        "avgChatsPerActiveUser": 46.95,
+                        "avgDurationPerActiveUser": 19.05,
+                        "totalChats": 1972,
+                        "totalDurationMinutes": 800.05,
+                        "weekEnd": "2025-08-24",
+                        "weekLabel": "Week 1 (08/18 - 08/24)",
+                        "weekNumber": 1,
+                        "weekStart": "2025-08-18"
+                    },
+                    {
+                        "activeUsers": 4,
+                        "avgChatsPerActiveUser": 24.75,
+                        "avgDurationPerActiveUser": 15.67,
+                        "totalChats": 99,
+                        "totalDurationMinutes": 62.69,
+                        "weekEnd": "2025-08-31",
+                        "weekLabel": "Week 2 (08/25 - 08/31)",
+                        "weekNumber": 2,
+                        "weekStart": "2025-08-25"
+                    }
+                ]
+            },
+            {
+                "cohortLabel": "Week of August 25, 2025",
+                "cohortWeek": "2025-08-25",
+                "maxActiveUsers": 60,
+                "retentionRate": 100.0,
+                "totalChatsAllWeeks": 2186,
+                "totalDurationAllWeeks": 1134.09,
+                "totalUsersInCohort": 60,
+                "weeklyProgress": [
+                    {
+                        "activeUsers": 60,
+                        "avgChatsPerActiveUser": 36.43,
+                        "avgDurationPerActiveUser": 18.9,
+                        "totalChats": 2186,
+                        "totalDurationMinutes": 1134.09,
+                        "weekEnd": "2025-08-31",
+                        "weekLabel": "Week 1 (08/25 - 08/31)",
+                        "weekNumber": 1,
+                        "weekStart": "2025-08-25"
+                    }
+                ]
+            }
+        ],
+        "dateRange": {
+            "endDate": "2025-08-31",
+            "filterMonth": "2025-08",
+            "startDate": "2025-08-01"
+        },
+        "totalCohorts": 5,
+        "totalUsersAnalyzed": 180
+    },
+    "includeUserDetails": false,
+    "success": true
+}

@@ -1120,3 +1120,269 @@ def get_user_day_wise_analytics():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+def get_week_start_date(date):
+    """Get the Monday of the week for a given date"""
+    days_since_monday = date.weekday()
+    monday = date - timedelta(days=days_since_monday)
+    return monday
+
+
+def calculate_weekly_cohort_analytics(start_date=None, end_date=None, filter_month=None):
+    """
+    Calculate weekly cohort analytics showing user progress over time
+    Groups users by their registration week and tracks their weekly activity
+    """
+    
+    # Set default date range if not provided
+    if not end_date:
+        end_date = datetime.now()
+    if not start_date:
+        start_date = end_date - timedelta(days=90)  # Default to last 3 months
+    
+    # If filter_month is provided, override start_date and end_date
+    if filter_month:
+        try:
+            # Parse month in format YYYY-MM
+            year, month = map(int, filter_month.split('-'))
+            start_date = datetime(year, month, 1)
+            # Get last day of the month
+            if month == 12:
+                end_date = datetime(year + 1, 1, 1) - timedelta(days=1)
+            else:
+                end_date = datetime(year, month + 1, 1) - timedelta(days=1)
+        except ValueError:
+            # If parsing fails, use default range
+            pass
+    
+    # Get all users who registered within the date range
+    users = list(db.users.find({
+        "createdAt": {
+            "$gte": start_date,
+            "$lte": end_date
+        }
+    }))
+    
+    # Group users by their registration week
+    weekly_cohorts = defaultdict(list)
+    
+    for user in users:
+        user_id = str(user["_id"])
+        created_at = user.get("createdAt")
+        
+        if created_at:
+            # Convert to datetime if it's a string
+            if isinstance(created_at, str):
+                created_at = parse_timestamp(created_at)
+            
+            # Get the Monday of the registration week
+            registration_week = get_week_start_date(created_at.date())
+            week_key = registration_week.strftime('%Y-%m-%d')
+            
+            weekly_cohorts[week_key].append({
+                "userId": user_id,
+                "userName": user.get("userName"),
+                "mobileNumber": user.get("mobileNumber"),
+                "age": user.get("age"),
+                "gender": user.get("gender"),
+                "createdAt": created_at,
+                "registrationWeek": week_key
+            })
+    
+    # Now calculate weekly progress for each cohort
+    cohort_analytics = []
+    
+    for cohort_week, cohort_users in weekly_cohorts.items():
+        cohort_week_date = datetime.strptime(cohort_week, '%Y-%m-%d').date()
+        
+        # Calculate how many weeks to track from registration week to end_date
+        weeks_to_track = []
+        current_week = cohort_week_date
+        end_week = get_week_start_date(end_date.date())
+        
+        while current_week <= end_week:
+            weeks_to_track.append(current_week)
+            current_week += timedelta(days=7)
+        
+        # Calculate analytics for each user in this cohort for each week
+        cohort_weekly_data = []
+        
+        for week_idx, week_start in enumerate(weeks_to_track):
+            week_end = week_start + timedelta(days=6)
+            week_key = f"week_{week_idx + 1}"
+            week_label = f"Week {week_idx + 1} ({week_start.strftime('%m/%d')} - {week_end.strftime('%m/%d')})"
+            
+            week_data = {
+                "weekNumber": week_idx + 1,
+                "weekLabel": week_label,
+                "weekStart": week_start.strftime('%Y-%m-%d'),
+                "weekEnd": week_end.strftime('%Y-%m-%d'),
+                "activeUsers": 0,
+                "totalChats": 0,
+                "totalDurationMinutes": 0,
+                "avgChatsPerActiveUser": 0,
+                "avgDurationPerActiveUser": 0,
+                "userDetails": []
+            }
+            
+            # Calculate metrics for each user in this cohort for this specific week
+            for user in cohort_users:
+                user_id = user["userId"]
+                
+                # Get chats for this user in this specific week
+                week_chats = list(db.chats.find({
+                    "userId": user_id,
+                    "timestamp": {
+                        "$gte": datetime.combine(week_start, datetime.min.time()).isoformat(),
+                        "$lte": datetime.combine(week_end, datetime.max.time()).isoformat()
+                    }
+                }).sort("timestamp", 1))
+                
+                if week_chats:
+                    week_data["activeUsers"] += 1
+                    week_data["totalChats"] += len(week_chats)
+                    
+                    # Calculate session duration for this week
+                    session_duration = 0
+                    if len(week_chats) > 1:
+                        # Group chats into sessions
+                        session_gap_seconds = 30 * 60  # 30 minutes
+                        sessions = []
+                        current_session = [week_chats[0]]
+                        
+                        for i in range(1, len(week_chats)):
+                            current_chat_time = parse_timestamp(week_chats[i]["timestamp"])
+                            prev_chat_time = parse_timestamp(week_chats[i-1]["timestamp"])
+                            time_gap = (current_chat_time - prev_chat_time).total_seconds()
+                            
+                            if time_gap <= session_gap_seconds:
+                                current_session.append(week_chats[i])
+                            else:
+                                sessions.append(current_session)
+                                current_session = [week_chats[i]]
+                        
+                        if current_session:
+                            sessions.append(current_session)
+                        
+                        # Calculate total duration from all sessions
+                        for session in sessions:
+                            if len(session) > 1:
+                                session_start = parse_timestamp(session[0]["timestamp"])
+                                session_end = parse_timestamp(session[-1]["timestamp"])
+                                session_duration += (session_end - session_start).total_seconds() / 60
+                    
+                    week_data["totalDurationMinutes"] += session_duration
+                    
+                    # Add user details for this week
+                    week_data["userDetails"].append({
+                        "userId": user_id,
+                        "userName": user["userName"],
+                        "chatsThisWeek": len(week_chats),
+                        "durationThisWeek": round(session_duration, 2),
+                        "firstChatThisWeek": week_chats[0]["timestamp"] if week_chats else None,
+                        "lastChatThisWeek": week_chats[-1]["timestamp"] if week_chats else None
+                    })
+            
+            # Calculate averages
+            if week_data["activeUsers"] > 0:
+                week_data["avgChatsPerActiveUser"] = round(week_data["totalChats"] / week_data["activeUsers"], 2)
+                week_data["avgDurationPerActiveUser"] = round(week_data["totalDurationMinutes"] / week_data["activeUsers"], 2)
+            
+            week_data["totalDurationMinutes"] = round(week_data["totalDurationMinutes"], 2)
+            cohort_weekly_data.append(week_data)
+        
+        # Calculate cohort summary statistics
+        total_users_in_cohort = len(cohort_users)
+        max_active_users = max([week["activeUsers"] for week in cohort_weekly_data]) if cohort_weekly_data else 0
+        total_chats_all_weeks = sum([week["totalChats"] for week in cohort_weekly_data])
+        total_duration_all_weeks = sum([week["totalDurationMinutes"] for week in cohort_weekly_data])
+        
+        cohort_analytics.append({
+            "cohortWeek": cohort_week,
+            "cohortLabel": f"Week of {cohort_week_date.strftime('%B %d, %Y')}",
+            "totalUsersInCohort": total_users_in_cohort,
+            "maxActiveUsers": max_active_users,
+            "retentionRate": round((max_active_users / total_users_in_cohort * 100), 2) if total_users_in_cohort > 0 else 0,
+            "totalChatsAllWeeks": total_chats_all_weeks,
+            "totalDurationAllWeeks": round(total_duration_all_weeks, 2),
+            "weeklyProgress": cohort_weekly_data,
+            "cohortUsers": cohort_users
+        })
+    
+    # Sort cohorts by registration week
+    cohort_analytics.sort(key=lambda x: x["cohortWeek"])
+    
+    return {
+        "dateRange": {
+            "startDate": start_date.strftime('%Y-%m-%d'),
+            "endDate": end_date.strftime('%Y-%m-%d'),
+            "filterMonth": filter_month
+        },
+        "totalCohorts": len(cohort_analytics),
+        "totalUsersAnalyzed": sum([cohort["totalUsersInCohort"] for cohort in cohort_analytics]),
+        "cohorts": cohort_analytics
+    }
+
+
+@user_analytics_bp.route('/weekly-cohort-analytics', methods=['GET'])
+def get_weekly_cohort_analytics():
+    """
+    API: Get weekly cohort analytics showing user progress over time
+    
+    This endpoint groups users by their registration week and tracks their weekly activity.
+    For example:
+    - Week 1: 20 new users registered -> track their activity in Week 1, Week 2, Week 3, etc.
+    - Week 2: 15 new users registered -> track their activity in Week 2, Week 3, Week 4, etc.
+    
+    Query params:
+    - filter_month: YYYY-MM format to filter users who registered in that month (optional)
+    - start_date: YYYY-MM-DD format (optional, default: 3 months ago)
+    - end_date: YYYY-MM-DD format (optional, default: today)
+    - include_user_details: include individual user details in each week (default: false)
+    
+    Example usage:
+    - /api/user-analytics/weekly-cohort-analytics?filter_month=2024-01
+    - /api/user-analytics/weekly-cohort-analytics?start_date=2024-01-01&end_date=2024-02-29
+    """
+    
+    try:
+        filter_month = request.args.get('filter_month')
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
+        include_user_details = request.args.get('include_user_details', 'false').lower() == 'true'
+        
+        # Parse custom date range if provided
+        start_date = None
+        end_date = None
+        
+        if start_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            except ValueError:
+                return jsonify({"error": "Invalid start_date format. Use YYYY-MM-DD"}), 400
+        
+        if end_date_str:
+            try:
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            except ValueError:
+                return jsonify({"error": "Invalid end_date format. Use YYYY-MM-DD"}), 400
+        
+        # Get cohort analytics
+        analytics_data = calculate_weekly_cohort_analytics(start_date, end_date, filter_month)
+        
+        # Remove user details from response if not requested
+        if not include_user_details:
+            for cohort in analytics_data["cohorts"]:
+                for week in cohort["weeklyProgress"]:
+                    week.pop("userDetails", None)
+                cohort.pop("cohortUsers", None)
+        
+        return jsonify({
+            "success": True,
+            "includeUserDetails": include_user_details,
+            "data": analytics_data
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
