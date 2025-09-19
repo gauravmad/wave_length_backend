@@ -36,6 +36,10 @@ class Config:
     AZURE_SPEECH_TO_TEXT_API_URL = os.getenv('AZURE_SPEECH_TO_TEXT_API_URL')
     AZURE_SPEECH_TO_TEXT_API_KEY = os.getenv('AZURE_SPEECH_TO_TEXT_API_KEY')
     
+    # AZURE TEXT TO SPEECH
+    AZURE_TEXT_TO_SPEECH_API_KEY = os.getenv('AZURE_TEXT_TO_SPEECH_API_KEY')
+    AZURE_TEXT_TO_SPEECH_REGION = os.getenv('AZURE_TEXT_TO_SPEECH_REGION')
+    
     @classmethod
     def validate_qdrant_config(cls) -> None:
         """Validate Qdrant configuration"""

@@ -176,3 +176,64 @@ def handle_voice_upload(file):
         raise Exception("AWS credentials not available")
     except Exception as e:
         raise Exception(f"Voice file upload failed: {str(e)}")
+
+def handle_speech_audio_upload(file):
+    """
+    Upload generated speech audio file to S3 in speech-audio folder
+    """
+    try:
+        s3 = boto3.client(
+            's3',
+            aws_access_key_id=Config.AWS_ACCESS_KEY,
+            aws_secret_access_key=Config.AWS_SECRET_ACCESS_KEY,
+            region_name=Config.AWS_REGION
+        )
+
+        # Get file extension
+        file_extension = os.path.splitext(file.filename)[1].lower()
+        
+        # Validate file type (more restrictive for generated audio)
+        allowed_extensions = ['.wav', '.mp3']
+        if file_extension not in allowed_extensions:
+            raise Exception(f"Unsupported speech audio format. Allowed formats: {', '.join(allowed_extensions)}")
+
+        # Sanitize the filename
+        safe_name = sanitize_filename(file.filename)
+        
+        # Add timestamp for uniqueness
+        now = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Add a short UUID for extra uniqueness
+        short_uuid = str(uuid.uuid4())[:8]
+        
+        # Create safe filename with original extension
+        unique_filename = f"{safe_name}_{now}_{short_uuid}{file_extension}"
+        key = f"speech-audio/{unique_filename}"
+
+        # Determine content type based on extension
+        content_type_map = {
+            '.wav': 'audio/wav',
+            '.mp3': 'audio/mpeg'
+        }
+        content_type = content_type_map.get(file_extension, 'audio/wav')
+
+        # Upload to S3
+        s3.upload_fileobj(
+            file.stream,
+            Config.AWS_S3_BUCKET_NAME,
+            key,
+            ExtraArgs={
+                "ContentType": content_type,
+                "CacheControl": "max-age=7200"  # 2 hour cache for generated speech files
+            }
+        )
+
+        # Generate the URL
+        file_url = f"https://{Config.AWS_S3_BUCKET_NAME}.s3.{Config.AWS_REGION}.amazonaws.com/{key}"
+        
+        return file_url
+
+    except NoCredentialsError:
+        raise Exception("AWS credentials not available")
+    except Exception as e:
+        raise Exception(f"Speech audio file upload failed: {str(e)}")
